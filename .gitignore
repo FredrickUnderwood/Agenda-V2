@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build output
+/bin/
+/dist/
+*.exe
+
+# Environment & secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Runtime config (may contain DB DSN / git tokens / gateway service token).
+# Keep config/agenda-v2.example.yaml as the template.
+config/agenda-v2.yaml
+config/agenda-v2.*.yaml
+!config/agenda-v2.example.yaml
+
+# Logs
+*.log

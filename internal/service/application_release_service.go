@@ -1,0 +1,249 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/agenda-v2/internal/domain"
+	"github.com/agenda-v2/internal/logger"
+	"github.com/agenda-v2/internal/repository"
+)
+
+// ApplicationReleaseService owns the ApplicationRelease state machine:
+//
+//	draft -> deploying -> pending_verify -> verified
+//	                \-> failed -> deploying (retry reuses the same deploy_log)
+//	verified -> rolling_back -> rolled_back
+//
+// It reads Application/ApplicationEnvTarget/ApplicationGatewayRoute/
+// ApplicationEnvironment directly via their repositories (not through their
+// services) purely to build point-in-time snapshots at release-creation
+// time — this is plain data assembly, not business-logic delegation, so it
+// does not violate the "no service-to-service calls" rule. Orchestrating an
+// actual pipeline run belongs to the application layer (ReleaseApplication).
+type ApplicationReleaseService struct {
+	releases *repository.ApplicationReleaseRepository
+	apps     *repository.ApplicationRepository
+	targets  *repository.ApplicationTargetRepository
+	routes   *repository.ApplicationGatewayRouteRepository
+	envs     *repository.ApplicationEnvironmentRepository
+}
+
+func NewApplicationReleaseService(
+	releases *repository.ApplicationReleaseRepository,
+	apps *repository.ApplicationRepository,
+	targets *repository.ApplicationTargetRepository,
+	routes *repository.ApplicationGatewayRouteRepository,
+	envs *repository.ApplicationEnvironmentRepository,
+) *ApplicationReleaseService {
+	return &ApplicationReleaseService{releases: releases, apps: apps, targets: targets, routes: routes, envs: envs}
+}
+
+type CreateReleaseRequest struct {
+	Env          domain.Environment `json:"env"           binding:"required"`
+	InstanceName string             `json:"instance_name"`
+	Branch       string             `json:"branch"         binding:"required"`
+	CommitSHA    string             `json:"commit_sha"`
+	Operator     string             `json:"operator"`
+}
+
+func (s *ApplicationReleaseService) Create(ctx context.Context, appID int64, req CreateReleaseRequest) (*domain.ApplicationRelease, error) {
+	env := domain.DefaultEnvironment(req.Env)
+	if !env.Valid() {
+		return nil, errors.New(fmt.Sprintf("invalid env %q", env))
+	}
+	instanceName := domain.NormalizeInstanceName(req.InstanceName)
+
+	app, err := s.apps.GetByID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.targets.GetByApplicationEnvInstance(ctx, appID, env, instanceName)
+	if err != nil {
+		return nil, err
+	}
+	if !target.Enabled {
+		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", env, instanceName))
+	}
+
+	rel, err := s.buildDraft(ctx, app, target, req.Branch, req.CommitSHA, req.Operator)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.releases.Create(ctx, rel); err != nil {
+		return nil, err
+	}
+	logStruct("release created", rel)
+	return rel, nil
+}
+
+// buildDraft assembles a new, unpersisted draft release for (app, target),
+// snapshotting the app's current deploy config / env-level config / gateway
+// routes so later inspection of a past release reflects what was configured
+// at the time, not whatever the application looks like today.
+func (s *ApplicationReleaseService) buildDraft(ctx context.Context, app *domain.Application, target *domain.ApplicationEnvTarget, branch, commitSHA, operator string) (*domain.ApplicationRelease, error) {
+	envRow, err := s.envs.GetByApplicationEnv(ctx, app.ID, target.Env)
+	if err != nil {
+		return nil, err
+	}
+	envConfigSnapshot := ""
+	if envRow != nil {
+		envConfigSnapshot, err = sonicMarshal(envRow)
+		if err != nil {
+			return nil, err
+		}
+	}
+	routes, err := s.routes.ListByApplicationEnv(ctx, app.ID, target.Env)
+	if err != nil {
+		return nil, err
+	}
+	routeSnapshot, err := sonicMarshal(routes)
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.ApplicationRelease{
+		ApplicationID:        app.ID,
+		Env:                  target.Env,
+		InstanceName:         target.InstanceName,
+		MachineID:            target.MachineID,
+		Branch:               branch,
+		CommitSHA:            commitSHA,
+		Status:               domain.ReleaseStatusDraft,
+		DeployConfigSnapshot: app.DeployConfig,
+		EnvConfigSnapshot:    envConfigSnapshot,
+		RouteSnapshot:        routeSnapshot,
+		Operator:             operator,
+	}, nil
+}
+
+func (s *ApplicationReleaseService) Get(ctx context.Context, id int64) (*domain.ApplicationRelease, error) {
+	return s.releases.GetByID(ctx, id)
+}
+
+type ListReleasesFilter = repository.ListReleasesFilter
+
+func (s *ApplicationReleaseService) List(ctx context.Context, f ListReleasesFilter) ([]*domain.ApplicationRelease, error) {
+	return s.releases.List(ctx, f)
+}
+
+// ResolveRollbackTarget returns the release a rollback should redeploy: the
+// explicitly requested targetReleaseID if given (must be verified and belong
+// to the same app/env/instance as badReleaseID), otherwise the most recent
+// verified release for that app/env/instance.
+func (s *ApplicationReleaseService) ResolveRollbackTarget(ctx context.Context, badReleaseID, targetReleaseID int64) (*domain.ApplicationRelease, error) {
+	bad, err := s.releases.GetByID(ctx, badReleaseID)
+	if err != nil {
+		return nil, err
+	}
+	if targetReleaseID > 0 {
+		target, err := s.releases.GetByID(ctx, targetReleaseID)
+		if err != nil {
+			return nil, err
+		}
+		if target.ApplicationID != bad.ApplicationID || target.Env != bad.Env || target.InstanceName != bad.InstanceName {
+			return nil, errors.New("rollback target release does not belong to the same application/env/instance")
+		}
+		if target.Status != domain.ReleaseStatusVerified {
+			return nil, errors.New(fmt.Sprintf("rollback target release is %s, not verified", target.Status))
+		}
+		return target, nil
+	}
+	latest, err := s.releases.GetLatestVerified(ctx, bad.ApplicationID, bad.Env, bad.InstanceName)
+	if err != nil {
+		return nil, err
+	}
+	if latest == nil {
+		return nil, errors.New("no verified release to roll back to")
+	}
+	if latest.ID == bad.ID {
+		return nil, errors.New("no earlier verified release to roll back to")
+	}
+	return latest, nil
+}
+
+// CreateRollbackDraft builds (and persists as draft) a new release that
+// redeploys target's commit, linked back to the release it supersedes.
+func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad, target *domain.ApplicationRelease) (*domain.ApplicationRelease, error) {
+	app, err := s.apps.GetByID(ctx, bad.ApplicationID)
+	if err != nil {
+		return nil, err
+	}
+	envTarget, err := s.targets.GetByApplicationEnvInstance(ctx, bad.ApplicationID, bad.Env, bad.InstanceName)
+	if err != nil {
+		return nil, err
+	}
+	if !envTarget.Enabled {
+		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", bad.Env, bad.InstanceName))
+	}
+	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, bad.Operator)
+	if err != nil {
+		return nil, err
+	}
+	rel.PreviousReleaseID = bad.ID
+	rel.PreviousCommitSHA = bad.CommitSHA
+	if err := s.releases.Create(ctx, rel); err != nil {
+		return nil, err
+	}
+	logStruct("rollback release created", rel)
+	return rel, nil
+}
+
+func (s *ApplicationReleaseService) Verify(ctx context.Context, id int64) (*domain.ApplicationRelease, error) {
+	rel, err := s.releases.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if rel.Status != domain.ReleaseStatusPendingVerify {
+		return nil, errors.New(fmt.Sprintf("cannot verify release in status %s", rel.Status))
+	}
+	now := time.Now().UTC()
+	if err := s.releases.UpdateStatus(ctx, id, domain.ReleaseStatusVerified, map[string]interface{}{"verified_at": &now}); err != nil {
+		return nil, err
+	}
+	rel.Status = domain.ReleaseStatusVerified
+	rel.VerifiedAt = &now
+	logger.L().Info("release verified", zap.Int64("id", id))
+	return rel, nil
+}
+
+// MarkDeploying transitions draft/failed -> deploying and records the
+// deploy_log driving this attempt.
+func (s *ApplicationReleaseService) MarkDeploying(ctx context.Context, id, deployLogID int64) error {
+	rel, err := s.releases.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rel.Status != domain.ReleaseStatusDraft && rel.Status != domain.ReleaseStatusFailed {
+		return errors.New(fmt.Sprintf("cannot deploy release in status %s", rel.Status))
+	}
+	return s.releases.UpdateStatus(ctx, id, domain.ReleaseStatusDeploying, map[string]interface{}{"deploy_log_id": deployLogID})
+}
+
+// MarkDeploySucceeded transitions deploying -> pending_verify. resolvedSHA is
+// the commit git_pull actually checked out (equal to the pinned commit_sha
+// when one was given, otherwise the resolved branch HEAD).
+func (s *ApplicationReleaseService) MarkDeploySucceeded(ctx context.Context, id int64, resolvedSHA string) error {
+	now := time.Now().UTC()
+	extra := map[string]interface{}{"deployed_at": &now}
+	if resolvedSHA != "" {
+		extra["commit_sha"] = resolvedSHA
+	}
+	return s.releases.UpdateStatus(ctx, id, domain.ReleaseStatusPendingVerify, extra)
+}
+
+func (s *ApplicationReleaseService) MarkDeployFailed(ctx context.Context, id int64) error {
+	return s.releases.UpdateStatus(ctx, id, domain.ReleaseStatusFailed, nil)
+}
+
+func (s *ApplicationReleaseService) MarkRollingBack(ctx context.Context, id int64) error {
+	return s.releases.UpdateStatus(ctx, id, domain.ReleaseStatusRollingBack, nil)
+}
+
+func (s *ApplicationReleaseService) MarkRolledBack(ctx context.Context, id int64) error {
+	return s.releases.UpdateStatus(ctx, id, domain.ReleaseStatusRolledBack, nil)
+}

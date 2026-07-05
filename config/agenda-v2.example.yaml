@@ -1,0 +1,50 @@
+# agenda-v2 config template. Copy to ~/.config/agenda-v2/agenda-v2.yaml (or
+# pass --config) and fill in the blanks. Schema is NOT auto-migrated — apply
+# resources/migrations/*.sql by hand before starting the server the first
+# time (see resources/migrations/README.md).
+
+server:
+  addr: ":8080"
+  auth_token: ""        # bearer token required on /api/v1/*; empty disables auth
+  pprof_addr: "127.0.0.1:6060"
+
+database:
+  dsn: "user:password@tcp(127.0.0.1:3306)/agenda_v2?charset=utf8mb4&parseTime=True&loc=Local"
+
+redis:
+  addr: "127.0.0.1:6379"
+  username: ""
+  password: ""
+  db: 0
+
+git:
+  git_bin: "git"
+  operation_timeout: "60s"
+  tokens: {}
+    # github.com: "ghp_xxx"
+
+deploy:
+  max_output_bytes: 65536
+  default_timeout: "5m"
+
+gateway:
+  enabled: false
+  base_url: ""
+  service_token: ""
+  timeout: "10s"
+  backend_scheme: "http"
+  backend_host: "host.docker.internal"
+
+log:
+  level: "info"
+
+workspace_root: "~/.agenda-v2/workspaces"
+
+machines: {}
+  # prod-1:
+  #   machine_type: prod
+  #   host: 10.0.0.10
+  #   user: deploy
+  #   port: 22
+  #   ssh_key_path: "~/.ssh/id_rsa"
+  #   workspace_root: "/root/.agenda-v2/workspaces"
