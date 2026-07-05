@@ -10,6 +10,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/application"
+	"github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
@@ -24,6 +25,8 @@ type Server struct {
 	machineSvc *service.MachineService
 	logSvc     *service.DeployLogService
 	settingSvc *service.SettingService
+	userSvc    *service.UserService
+	auth       *auth.Manager
 	releaseApp *application.ReleaseApplication
 	httpServer *http.Server
 }
@@ -37,13 +40,16 @@ func NewServer(
 	machineSvc *service.MachineService,
 	logSvc *service.DeployLogService,
 	settingSvc *service.SettingService,
+	userSvc *service.UserService,
+	authMgr *auth.Manager,
 	releaseApp *application.ReleaseApplication,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
 		cfg: cfg, engine: gin.New(),
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc,
-		machineSvc: machineSvc, logSvc: logSvc, settingSvc: settingSvc, releaseApp: releaseApp,
+		machineSvc: machineSvc, logSvc: logSvc, settingSvc: settingSvc,
+		userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
 	s.engine.Use(ginzap.RecoveryWithZap(logger.L(), true))
@@ -62,10 +68,18 @@ func (s *Server) registerRoutes() {
 	})
 
 	v1 := s.engine.Group("/api/v1")
-	if s.cfg.Server.AuthToken != "" {
-		v1.Use(bearerAuth(s.cfg.Server.AuthToken))
+
+	// Public: login issues a token, so it must precede the auth middleware.
+	v1.POST("/auth/login", s.login)
+
+	// Everything registered after this requires authentication when auth is
+	// configured; with neither jwt_secret nor auth_token set the API stays open
+	// (dev mode).
+	if s.auth.Enabled() {
+		v1.Use(s.auth.Middleware())
 	}
 
+	v1.GET("/auth/me", s.me)
 	v1.GET("/config", s.getConfig)
 
 	apps := v1.Group("/applications")
@@ -107,11 +121,22 @@ func (s *Server) registerRoutes() {
 		machines.POST("/:machineID/test", s.testMachineConnection)
 	}
 
+	// Settings hold secrets (tokens) — admin only.
 	settings := v1.Group("/settings")
+	settings.Use(s.requireAdmin())
 	{
 		settings.GET("", s.listSettings)
 		settings.PUT("/:key", s.upsertSetting)
 		settings.DELETE("/:key", s.deleteSetting)
+	}
+
+	// User management — admin only.
+	users := v1.Group("/users")
+	users.Use(s.requireAdmin())
+	{
+		users.GET("", s.listUsers)
+		users.POST("", s.createUser)
+		users.DELETE("/:userID", s.deleteUser)
 	}
 }
 

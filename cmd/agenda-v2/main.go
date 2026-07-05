@@ -15,6 +15,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/application"
+	"github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/handler"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/pipeline"
@@ -61,6 +62,7 @@ func main() {
 	logRepo := repository.NewDeployLogRepository(db)
 	stepRepo := repository.NewPipelineStepRepository(db)
 	settingRepo := repository.NewSettingRepository(db)
+	userRepo := repository.NewUserRepository(db)
 
 	// Service
 	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
@@ -79,6 +81,11 @@ func main() {
 	// runtime; the static yaml git.tokens map remains as a bootstrap fallback.
 	cfg.Git.TokenResolver = settingSvc.GitToken
 	cfg.Git.SecretValues = settingSvc.SecretValues
+	userSvc := service.NewUserService(userRepo)
+	authMgr := auth.NewManager(cfg.Auth.JWTSecret, cfg.Server.AuthToken, cfg.Auth.TokenTTL.Duration)
+	if err := userSvc.EnsureBootstrapAdmin(context.Background(), cfg.Auth.BootstrapAdminUsername, cfg.Auth.BootstrapAdminPassword); err != nil {
+		logger.L().Warn("failed to ensure bootstrap admin", zap.Error(err))
+	}
 
 	// Pipeline
 	builder := pipeline.NewBuilder(cfg, machineSvc, appSvc, appEnvironmentSvc)
@@ -92,7 +99,7 @@ func main() {
 	defer healthMonitor.Stop()
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, settingSvc, releaseApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, settingSvc, userSvc, authMgr, releaseApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

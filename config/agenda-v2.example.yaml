@@ -48,6 +48,18 @@ security:
   # unreadable. Empty disables encryption (secrets stored in plaintext + warning).
   master_key: ""
 
+auth:
+  # Built-in identity. jwt_secret signs user login tokens (HMAC); both the
+  # control plane and the gateway verify locally against it. Empty disables user
+  # login (the static server.auth_token above still works as a service principal,
+  # and with neither set the API is open — dev mode only).
+  jwt_secret: ""
+  token_ttl: "24h"
+  # Seeds the first admin when the user table is empty. Remove/rotate after the
+  # first successful login.
+  bootstrap_admin_username: ""
+  bootstrap_admin_password: ""
+
 workspace_root: "~/.agenda-v2/workspaces"
 
 machines: {}

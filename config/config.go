@@ -18,8 +18,20 @@ type Config struct {
 	Gateway       GatewayConfig            `yaml:"gateway"`
 	Log           LogConfig                `yaml:"log"`
 	Security      SecurityConfig           `yaml:"security"`
+	Auth          AuthConfig               `yaml:"auth"`
 	Machines      map[string]MachineConfig `yaml:"machines"`
 	WorkspaceRoot string                   `yaml:"workspace_root"`
+}
+
+// AuthConfig configures the built-in identity layer (internal/auth). JWTSecret
+// signs/verifies user tokens; an empty secret disables user login (the static
+// server.auth_token still works as a service principal). BootstrapAdmin* seeds
+// the first admin when the user table is empty.
+type AuthConfig struct {
+	JWTSecret              string   `yaml:"jwt_secret"`
+	TokenTTL               duration `yaml:"token_ttl"`
+	BootstrapAdminUsername string   `yaml:"bootstrap_admin_username"`
+	BootstrapAdminPassword string   `yaml:"bootstrap_admin_password"`
 }
 
 // SecurityConfig holds bootstrap secrets that must exist before the DB is
@@ -145,6 +157,7 @@ func defaults() *Config {
 			BackendHost:   "host.docker.internal",
 		},
 		Log:           LogConfig{Level: "info"},
+		Auth:          AuthConfig{TokenTTL: duration{24 * time.Hour}},
 		WorkspaceRoot: "~/.agenda-v2/workspaces",
 	}
 }
