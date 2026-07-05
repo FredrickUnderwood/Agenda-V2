@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -63,6 +64,27 @@ func (r *MachineRepository) Delete(ctx context.Context, id int64) error {
 	if err := r.db.WithContext(ctx).Delete(&domain.Machine{}, id).Error; err != nil {
 		logger.L().Error("failed to delete machine", zap.Int64("id", id), zap.Error(err))
 		return err
+	}
+	return nil
+}
+
+// UpdateHeartbeat records an agent heartbeat, touching only the heartbeat
+// timestamp and version columns (a targeted update, not a full Save, so a
+// concurrent Machine edit is not clobbered). Returns gorm.ErrRecordNotFound
+// when no such machine exists.
+func (r *MachineRepository) UpdateHeartbeat(ctx context.Context, id int64, version string, at time.Time) error {
+	res := r.db.WithContext(ctx).Model(&domain.Machine{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"agent_last_heartbeat_at": at,
+			"agent_version":           version,
+		})
+	if res.Error != nil {
+		logger.L().Error("failed to update heartbeat", zap.Int64("id", id), zap.Error(res.Error))
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
 	}
 	return nil
 }

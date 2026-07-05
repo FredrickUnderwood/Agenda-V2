@@ -13,8 +13,6 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
-const headerNodeToken = "X-Agenda-Node-Token"
-
 // Server is agenda-node's management API (jobs + proxy registration + health).
 // Commands execute locally via runner.New(nil) — the node reuses the exact same
 // localRunner the control plane uses, so it never reimplements command running.
@@ -61,7 +59,7 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) tokenAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tok := c.GetHeader(headerNodeToken)
+		tok := c.GetHeader(contract.HeaderNodeToken)
 		if tok == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid node token"})
 			return

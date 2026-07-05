@@ -1,15 +1,17 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 func (s *Server) listMachines(c *gin.Context) {
-	machines, err := s.machineSvc.List(c.Request.Context())
+	machines, err := s.machineSvc.ListViews(c.Request.Context())
 	if err != nil {
 		FailWith(c, http.StatusInternalServerError, err)
 		return
@@ -37,7 +39,7 @@ func (s *Server) getMachine(c *gin.Context) {
 		FailMessage(c, http.StatusBadRequest, "invalid machine ID")
 		return
 	}
-	m, err := s.machineSvc.Get(c.Request.Context(), id)
+	m, err := s.machineSvc.GetView(c.Request.Context(), id)
 	if err != nil {
 		FailWith(c, http.StatusNotFound, err)
 		return
@@ -75,6 +77,34 @@ func (s *Server) deleteMachine(c *gin.Context) {
 		return
 	}
 	NoContent(c)
+}
+
+// machineHeartbeat receives an agenda-node heartbeat. It authenticates with the
+// per-machine X-Agenda-Node-Token (verified against machine.agent_token), NOT
+// the global admin bearer token — the caller is a node, not an operator.
+func (s *Server) machineHeartbeat(c *gin.Context) {
+	id, ok := paramInt64(c, "machineID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid machine ID")
+		return
+	}
+	token := c.GetHeader(contract.HeaderNodeToken)
+	if token == "" {
+		FailMessage(c, http.StatusUnauthorized, "missing node token")
+		return
+	}
+	var req contract.NodeHeartbeatRequest
+	_ = c.ShouldBindJSON(&req)
+	err := s.machineSvc.Heartbeat(c.Request.Context(), id, token, req.Version)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			FailMessage(c, http.StatusUnauthorized, "invalid node token")
+			return
+		}
+		FailWith(c, http.StatusNotFound, err)
+		return
+	}
+	Success(c, gin.H{"ok": true})
 }
 
 func (s *Server) testMachineConnection(c *gin.Context) {

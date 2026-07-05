@@ -7,6 +7,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gatewayclient"
+	"github.com/FredrickUnderwood/agenda-v2/internal/nodeproxy"
 )
 
 type GatewayRouteSyncStep struct {
@@ -37,6 +38,14 @@ type GatewayBackendSpec struct {
 	URL          string
 	Weight       int
 	Healthy      bool
+
+	// Proxy* are set only for agent-mode backends. When ProxyAgentBaseURL is
+	// non-empty the step first registers ProxyPort with the node's reverse proxy
+	// (so URL, which points at the node's stable /i/<instance> path, resolves to
+	// the instance's current local port) before syncing the route to the gateway.
+	ProxyAgentBaseURL string
+	ProxyAgentToken   string
+	ProxyPort         int
 }
 
 func (s *GatewayRouteSyncStep) Execute(ctx context.Context, rc *RunContext) error {
@@ -52,6 +61,15 @@ func (s *GatewayRouteSyncStep) Execute(ctx context.Context, rc *RunContext) erro
 		backends := make([]contract.BackendEntry, 0, len(route.Backends))
 		urls := make([]string, 0, len(route.Backends))
 		for _, backend := range route.Backends {
+			// Agent-mode backends: register the instance's current port with the
+			// node's reverse proxy before pointing the gateway at the node's
+			// stable proxy URL. A registration failure fails the step (same
+			// all-or-nothing granularity as the route upsert itself).
+			if backend.ProxyAgentBaseURL != "" {
+				if err := nodeproxy.RegisterProxyTarget(ctx, backend.ProxyAgentBaseURL, backend.ProxyAgentToken, backend.InstanceName, backend.ProxyPort); err != nil {
+					return fmt.Errorf("register proxy target for instance %q: %w", backend.InstanceName, err)
+				}
+			}
 			enabled := route.Enabled
 			healthy := backend.Healthy
 			backends = append(backends, contract.BackendEntry{

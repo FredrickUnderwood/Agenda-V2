@@ -73,6 +73,7 @@ func main() {
 	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
 	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
 	machineSvc := service.NewMachineService(machineRepo)
+	machineSvc.SetAgentPollInterval(cfg.Deploy.AgentPollInterval.Duration)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)

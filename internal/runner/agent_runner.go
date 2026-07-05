@@ -16,8 +16,6 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 )
 
-const headerNodeToken = "X-Agenda-Node-Token"
-
 const defaultPollInterval = 2 * time.Second
 
 // agentRunner implements Runner by dispatching a job to an agenda-node and
@@ -117,7 +115,7 @@ func (a *agentRunner) postJSON(ctx context.Context, path string, body any) error
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(headerNodeToken, a.machine.AgentToken)
+	req.Header.Set(contract.HeaderNodeToken, a.machine.AgentToken)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return err
@@ -137,7 +135,7 @@ func (a *agentRunner) getJob(ctx context.Context, jobID string) (contract.NodeJo
 	if err != nil {
 		return contract.NodeJobStatus{}, 0, err
 	}
-	req.Header.Set(headerNodeToken, a.machine.AgentToken)
+	req.Header.Set(contract.HeaderNodeToken, a.machine.AgentToken)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return contract.NodeJobStatus{}, 0, err
@@ -158,7 +156,7 @@ func (a *agentRunner) deleteJob(ctx context.Context, jobID string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set(headerNodeToken, a.machine.AgentToken)
+	req.Header.Set(contract.HeaderNodeToken, a.machine.AgentToken)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return err

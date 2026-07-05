@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
@@ -237,7 +238,6 @@ func (b *Builder) buildGatewayRouteSync(ctx context.Context, target *domain.Depl
 	if scheme == "" {
 		scheme = "http"
 	}
-	host := b.resolveBackendHost(machine)
 	selfTargetKey := util.Slug(target.App.Name) + "-" + util.Slug(string(target.Env())) + "-" + util.Slug(targetInstanceName(target)) + "-" + strconv.Itoa(port)
 	selfInstanceName := targetInstanceName(target)
 
@@ -271,12 +271,16 @@ func (b *Builder) buildGatewayRouteSync(ctx context.Context, target *domain.Depl
 		if pathPrefix == "" {
 			pathPrefix = "/"
 		}
+		selfURL, selfProxyBase, selfProxyToken, selfProxyPort := b.resolveBackend(machine, scheme, selfInstanceName, port, route.BackendPath)
 		self := GatewayBackendSpec{
-			InstanceName: selfInstanceName,
-			TargetKey:    selfTargetKey,
-			URL:          backendURL(scheme, host, port, route.BackendPath),
-			Weight:       1,
-			Healthy:      route.Enabled,
+			InstanceName:      selfInstanceName,
+			TargetKey:         selfTargetKey,
+			URL:               selfURL,
+			Weight:            1,
+			Healthy:           route.Enabled,
+			ProxyAgentBaseURL: selfProxyBase,
+			ProxyAgentToken:   selfProxyToken,
+			ProxyPort:         selfProxyPort,
 		}
 		backends, err := b.resolveRouteBackends(ctx, route, target.App.Name, dockerCfg, scheme, self, loadSiblings)
 		if err != nil {
@@ -401,19 +405,22 @@ func (b *Builder) backendSpecForTarget(ctx context.Context, t *domain.Applicatio
 	if err != nil {
 		return GatewayBackendSpec{}, false
 	}
-	host := b.resolveBackendHost(machine)
 	instanceName := domain.NormalizeInstanceName(t.InstanceName)
 	targetKey := util.Slug(appName) + "-" + util.Slug(string(t.Env)) + "-" + util.Slug(instanceName) + "-" + strconv.Itoa(t.Port)
 	healthy := true
 	if t.HealthCheckEnabled {
 		healthy = t.Health != nil && t.Health.Status == domain.HealthStatusHealthy
 	}
+	url, proxyBase, proxyToken, proxyPort := b.resolveBackend(machine, scheme, instanceName, t.Port, backendPath)
 	return GatewayBackendSpec{
-		InstanceName: instanceName,
-		TargetKey:    targetKey,
-		URL:          backendURL(scheme, host, t.Port, backendPath),
-		Weight:       weight,
-		Healthy:      healthy,
+		InstanceName:      instanceName,
+		TargetKey:         targetKey,
+		URL:               url,
+		Weight:            weight,
+		Healthy:           healthy,
+		ProxyAgentBaseURL: proxyBase,
+		ProxyAgentToken:   proxyToken,
+		ProxyPort:         proxyPort,
 	}, true
 }
 
@@ -425,6 +432,21 @@ func (b *Builder) resolveBackendHost(machine *config.MachineConfig) string {
 		return machine.Host
 	}
 	return "host.docker.internal"
+}
+
+// resolveBackend returns the gateway-facing backend URL for an instance and, in
+// agent mode, the proxy-registration fields the sync step needs. In agent mode
+// the URL points at the node's stable proxy path (proxyBaseURL + /i/<instance>),
+// hiding the drifting real port from the gateway; the real port is instead
+// registered with the node. In ssh/local mode the URL is the direct host:port
+// (current behavior) and the proxy fields are empty.
+func (b *Builder) resolveBackend(machine *config.MachineConfig, scheme, instanceName string, port int, backendPath string) (url, proxyBaseURL, proxyToken string, proxyPort int) {
+	if machine != nil && machine.IsAgent() && machine.AgentProxyBaseURL != "" {
+		proxyURL := strings.TrimRight(machine.AgentProxyBaseURL, "/") + "/i/" + instanceName + backendPath
+		return proxyURL, machine.AgentBaseURL, machine.AgentToken, port
+	}
+	host := b.resolveBackendHost(machine)
+	return backendURL(scheme, host, port, backendPath), "", "", 0
 }
 
 func backendURL(scheme, host string, port int, backendPath string) string {

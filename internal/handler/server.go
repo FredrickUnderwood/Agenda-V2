@@ -71,6 +71,9 @@ func (s *Server) registerRoutes() {
 
 	// Public: login issues a token, so it must precede the auth middleware.
 	v1.POST("/auth/login", s.login)
+	// Node heartbeat authenticates with the per-machine node token (checked in
+	// the handler), not the admin bearer, so it lives before the auth middleware.
+	v1.POST("/machines/:machineID/heartbeat", s.machineHeartbeat)
 
 	// Everything registered after this requires authentication when auth is
 	// configured; with neither jwt_secret nor auth_token set the API stays open

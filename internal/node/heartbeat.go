@@ -74,7 +74,7 @@ func (h *Heartbeat) send(ctx context.Context) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(headerNodeToken, h.token)
+	req.Header.Set(contract.HeaderNodeToken, h.token)
 	resp, err := h.client.Do(req)
 	if err != nil {
 		log.Warn(ctx, "heartbeat failed", zap.Error(err))
