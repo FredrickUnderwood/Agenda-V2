@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
 	coreauth "github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/application"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/auth"
@@ -17,6 +16,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/handler"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/repository"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/service"
+	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"go.uber.org/zap"
 )
 

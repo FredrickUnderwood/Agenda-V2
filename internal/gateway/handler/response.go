@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/domain"
+	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )

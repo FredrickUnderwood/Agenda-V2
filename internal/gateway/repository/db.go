@@ -3,8 +3,8 @@ package repository
 import (
 	"time"
 
-	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/domain"
+	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"

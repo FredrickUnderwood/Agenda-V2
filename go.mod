@@ -3,7 +3,7 @@ module github.com/FredrickUnderwood/agenda-v2
 go 1.26.1
 
 require (
-	github.com/FredrickUnderwood/agenda-go-sdk v0.0.0-20260505063812-b12519f03931
+	github.com/FredrickUnderwood/agenda-v2/sdk/go v0.0.0
 	github.com/bytedance/sonic v1.15.0
 	github.com/gin-contrib/zap v1.1.7
 	github.com/gin-gonic/gin v1.12.0
@@ -16,6 +16,10 @@ require (
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+// The SDK is developed in-tree as a standalone module; build against the local
+// copy rather than a published version.
+replace github.com/FredrickUnderwood/agenda-v2/sdk/go => ./sdk/go
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

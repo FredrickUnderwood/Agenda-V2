@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
 	coreauth "github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/config"
+	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
