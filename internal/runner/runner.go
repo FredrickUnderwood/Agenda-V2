@@ -46,10 +46,16 @@ type Runner interface {
 	RunShell(ctx context.Context, dir, shellCmd string, buf *bytes.Buffer) error
 }
 
-// New returns a LocalRunner when machine is nil/local, otherwise an SSHRunner.
+// New selects the execution backend for a machine: a localRunner when
+// nil/local, an agentRunner when Mode is "agent" (execute via agenda-node), and
+// an sshRunner otherwise. IsLocal already reports false for agent machines, so
+// the ordering here is safe.
 func New(machine *config.MachineConfig) Runner {
 	if machine.IsLocal() {
 		return &localRunner{}
+	}
+	if machine.IsAgent() {
+		return newAgentRunner(machine)
 	}
 	return &sshRunner{machine: machine}
 }

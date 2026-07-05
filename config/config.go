@@ -51,8 +51,9 @@ type RedisConfig struct {
 	DB       int    `yaml:"db"`
 }
 
-// MachineConfig holds SSH connection info for a remote deploy target. An
-// empty Host means "localhost" (no SSH needed).
+// MachineConfig holds connection info for a remote deploy target. An empty Host
+// means "localhost" (no SSH needed) — unless Mode is "agent", in which case the
+// target is reached over its agenda-node agent (AgentBaseURL), never locally.
 type MachineConfig struct {
 	MachineType   string `yaml:"machine_type"`
 	Host          string `yaml:"host"`
@@ -61,10 +62,33 @@ type MachineConfig struct {
 	SSHKeyPath    string `yaml:"ssh_key_path"`
 	Password      string `yaml:"password"`
 	WorkspaceRoot string `yaml:"workspace_root"`
+
+	// agenda-node agent mode. Mode "agent" routes execution through the node's
+	// management API instead of SSH; the reverse-proxy base URL is used by the
+	// gateway route sync to point backends at the node instead of a raw port.
+	Mode              string `yaml:"mode"`
+	AgentBaseURL      string `yaml:"agent_base_url"`
+	AgentProxyBaseURL string `yaml:"agent_proxy_base_url"`
+	AgentToken        string `yaml:"agent_token"`
+	// AgentPollInterval is how often agentRunner polls the node for job status.
+	// Derived from the global deploy.agent_poll_interval when the MachineConfig
+	// is built; not set directly in per-machine yaml.
+	AgentPollInterval time.Duration `yaml:"-"`
+}
+
+// IsAgent reports whether this machine is reached via an agenda-node agent.
+func (m *MachineConfig) IsAgent() bool {
+	return m != nil && m.Mode == "agent"
 }
 
 func (m *MachineConfig) IsLocal() bool {
-	return m == nil || m.Host == ""
+	if m == nil {
+		return true
+	}
+	if m.Mode == "agent" {
+		return false
+	}
+	return m.Host == ""
 }
 
 // GetMachine returns the MachineConfig for the given name. Returns nil when
@@ -105,8 +129,9 @@ type GitConfig struct {
 }
 
 type DeployConfig struct {
-	MaxOutputBytes int      `yaml:"max_output_bytes"`
-	DefaultTimeout duration `yaml:"default_timeout"`
+	MaxOutputBytes    int      `yaml:"max_output_bytes"`
+	DefaultTimeout    duration `yaml:"default_timeout"`
+	AgentPollInterval duration `yaml:"agent_poll_interval"`
 }
 
 type GatewayConfig struct {
@@ -148,8 +173,9 @@ func defaults() *Config {
 		},
 		Machines: map[string]MachineConfig{},
 		Deploy: DeployConfig{
-			MaxOutputBytes: 65536,
-			DefaultTimeout: duration{5 * time.Minute},
+			MaxOutputBytes:    65536,
+			DefaultTimeout:    duration{5 * time.Minute},
+			AgentPollInterval: duration{2 * time.Second},
 		},
 		Gateway: GatewayConfig{
 			Timeout:       duration{10 * time.Second},
