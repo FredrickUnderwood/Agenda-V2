@@ -10,7 +10,7 @@ import (
 	"time"
 
 	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
-	usercore "github.com/FredrickUnderwood/user-core-go-sdk"
+	coreauth "github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/application"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/config"
@@ -42,7 +42,7 @@ func main() {
 
 	ctx := context.Background()
 	alog.Info(ctx, "permissions exposed",
-		zap.String("app", cfg.UserCore.AppID),
+		zap.String("app", cfg.AppName),
 		zap.Strings("perms", auth.All()),
 	)
 
@@ -67,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	uc := usercore.New(cfg.UserCore.BaseURL, cfg.UserCore.AppID, cfg.UserCore.JWTSecret)
+	authMgr := coreauth.NewManager(cfg.Auth.JWTSecret, "", 0)
 	routeRepo := repository.NewRouteRepository(db)
 	routeSvc := service.NewRouteService(routeRepo, cfg.Gateway.DefaultBackendTimeout)
 	gatewayApp := application.NewGatewayApplication(routeSvc, cfg.Gateway.RefreshInterval)
@@ -77,13 +77,13 @@ func main() {
 	}
 	defer gatewayApp.Stop()
 
-	srv := handler.NewServer(cfg, db, uc, routeSvc, gatewayApp)
+	srv := handler.NewServer(cfg, db, authMgr, routeSvc, gatewayApp)
 
 	serverErr := make(chan error, 1)
 	go func() {
 		alog.Info(ctx, "server starting",
 			zap.String("addr", cfg.Server.Addr),
-			zap.String("app", cfg.UserCore.AppID),
+			zap.String("app", cfg.AppName),
 			zap.Int("service_token_count", len(cfg.ServiceTokens)),
 		)
 		serverErr <- srv.Start()

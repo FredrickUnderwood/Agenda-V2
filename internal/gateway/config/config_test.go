@@ -8,8 +8,6 @@ import (
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GATEWAY_DATABASE_DSN", "user:pass@tcp(localhost:3306)/agenda?parseTime=true")
-	t.Setenv("GATEWAY_USER_CORE_BASE_URL", "http://user-core:8082")
-	t.Setenv("GATEWAY_USER_CORE_JWT_SECRET", "secret")
 }
 
 func TestLoadRequiresServiceToken(t *testing.T) {

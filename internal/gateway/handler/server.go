@@ -6,7 +6,7 @@ import (
 	"time"
 
 	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
-	usercore "github.com/FredrickUnderwood/user-core-go-sdk"
+	coreauth "github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/application"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/config"
@@ -21,7 +21,7 @@ type Server struct {
 	cfg           *config.Config
 	engine        *gin.Engine
 	db            *gorm.DB
-	uc            *usercore.Client
+	authMgr       *coreauth.Manager
 	serviceTokens []serviceTokenEntry
 	routes        *service.RouteService
 	gateway       *application.GatewayApplication
@@ -32,7 +32,7 @@ type Server struct {
 func NewServer(
 	cfg *config.Config,
 	db *gorm.DB,
-	uc *usercore.Client,
+	authMgr *coreauth.Manager,
 	routes *service.RouteService,
 	gateway *application.GatewayApplication,
 ) *Server {
@@ -41,7 +41,7 @@ func NewServer(
 		cfg:           cfg,
 		engine:        gin.New(),
 		db:            db,
-		uc:            uc,
+		authMgr:       authMgr,
 		serviceTokens: buildServiceTokens(cfg.ServiceTokens),
 		routes:        routes,
 		gateway:       gateway,

@@ -4,7 +4,6 @@ go 1.26.1
 
 require (
 	github.com/FredrickUnderwood/agenda-go-sdk v0.0.0-20260505063812-b12519f03931
-	github.com/FredrickUnderwood/user-core-go-sdk v0.0.1
 	github.com/bytedance/sonic v1.15.0
 	github.com/gin-contrib/zap v1.1.7
 	github.com/gin-gonic/gin v1.12.0

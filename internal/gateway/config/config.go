@@ -13,7 +13,7 @@ type Config struct {
 	LogLevel      string
 	Server        ServerConfig
 	MySQL         MySQLConfig
-	UserCore      UserCoreConfig
+	Auth          AuthConfig
 	ServiceTokens []ServiceTokenConfig
 	Gateway       GatewayConfig
 }
@@ -29,9 +29,11 @@ type MySQLConfig struct {
 	ConnMaxLifetime time.Duration
 }
 
-type UserCoreConfig struct {
-	BaseURL   string
-	AppID     string
+// AuthConfig holds the shared JWT secret used to verify user tokens minted by
+// the control plane's built-in auth (internal/auth). Empty means the admin API
+// accepts only service tokens (no user-JWT path). This replaces the former
+// external user-core dependency.
+type AuthConfig struct {
 	JWTSecret string
 }
 
@@ -59,10 +61,8 @@ func Load() (*Config, error) {
 			MaxIdleConns:    intEnv("GATEWAY_MYSQL_MAX_IDLE_CONNS", 10),
 			ConnMaxLifetime: durationEnv("GATEWAY_MYSQL_CONN_MAX_LIFETIME", time.Hour),
 		},
-		UserCore: UserCoreConfig{
-			BaseURL:   os.Getenv("GATEWAY_USER_CORE_BASE_URL"),
-			AppID:     env("GATEWAY_USER_CORE_APP_ID", "agenda-gateway"),
-			JWTSecret: os.Getenv("GATEWAY_USER_CORE_JWT_SECRET"),
+		Auth: AuthConfig{
+			JWTSecret: os.Getenv("GATEWAY_JWT_SECRET"),
 		},
 		Gateway: GatewayConfig{
 			RefreshInterval:       durationEnv("GATEWAY_REFRESH_INTERVAL", 2*time.Second),
@@ -75,9 +75,6 @@ func Load() (*Config, error) {
 	}
 	if len(cfg.ServiceTokens) == 0 {
 		return nil, errors.New("GATEWAY_SERVICE_TOKEN is required")
-	}
-	if cfg.UserCore.BaseURL == "" || cfg.UserCore.AppID == "" || cfg.UserCore.JWTSecret == "" {
-		return nil, errors.New("GATEWAY_USER_CORE_BASE_URL / GATEWAY_USER_CORE_APP_ID / GATEWAY_USER_CORE_JWT_SECRET are required")
 	}
 	return cfg, nil
 }

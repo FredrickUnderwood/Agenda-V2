@@ -3,9 +3,10 @@ package handler
 import (
 	"crypto/subtle"
 	"net/http"
+	"strings"
 
 	alog "github.com/FredrickUnderwood/agenda-go-sdk/log"
-	usercore "github.com/FredrickUnderwood/user-core-go-sdk"
+	coreauth "github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/config"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -56,8 +57,11 @@ func matchServiceToken(tokens []serviceTokenEntry, token string) (serviceTokenEn
 	return serviceTokenEntry{}, false
 }
 
+// authMiddleware authenticates admin-API requests. A request presenting a valid
+// X-Service-Token is authenticated as a service principal with that token's
+// perms; otherwise the request must carry a user JWT minted by the control
+// plane's built-in auth, verified locally against the shared secret.
 func (s *Server) authMiddleware() gin.HandlerFunc {
-	ucMW := s.uc.Middleware()
 	return func(c *gin.Context) {
 		if token := c.GetHeader(HeaderServiceToken); token != "" {
 			if item, ok := matchServiceToken(s.serviceTokens, token); ok {
@@ -74,27 +78,38 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 			}})
 			return
 		}
+
+		tok := bearerToken(c)
+		if tok == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{Error: ErrorBody{
+				Code:    401,
+				Message: "missing credentials",
+			}})
+			return
+		}
+		id, err := s.authMgr.Verify(tok)
+		if err != nil {
+			alog.L().Warn("invalid user token presented", zap.Error(err))
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{Error: ErrorBody{
+				Code:    401,
+				Message: "invalid token",
+			}})
+			return
+		}
 		c.Set(ctxAuthKind, AuthKindUser)
-		ucMW(c)
+		c.Set(ctxAuthID, id.Username)
+		c.Set(ctxAuthPerms, permSet(id.Perms))
+		c.Next()
 	}
 }
 
 func requirePerm(perm string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if v, ok := c.Get(ctxAuthPerms); ok {
-			if m, _ := v.(map[string]bool); m[perm] {
+			if m, _ := v.(map[string]bool); m[perm] || m[coreauth.PermAll] {
 				c.Next()
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: ErrorBody{
-				Code:    403,
-				Message: "service token lacks perm: " + perm,
-			}})
-			return
-		}
-		if usercore.HasPerm(c, perm) {
-			c.Next()
-			return
 		}
 		c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: ErrorBody{
 			Code:    403,
@@ -109,9 +124,6 @@ func operator(c *gin.Context) string {
 			return id
 		}
 	}
-	if id := usercore.UID(c); id != "" {
-		return id
-	}
 	return "unknown"
 }
 
@@ -120,4 +132,20 @@ func logCaller(c *gin.Context, action string) {
 		zap.String("auth_kind", c.GetString(ctxAuthKind)),
 		zap.String("operator", operator(c)),
 	)
+}
+
+func permSet(perms []string) map[string]bool {
+	m := make(map[string]bool, len(perms))
+	for _, p := range perms {
+		m[p] = true
+	}
+	return m
+}
+
+func bearerToken(c *gin.Context) string {
+	h := c.GetHeader("Authorization")
+	if after, found := strings.CutPrefix(h, "Bearer "); found {
+		return strings.TrimSpace(after)
+	}
+	return strings.TrimSpace(h)
 }
