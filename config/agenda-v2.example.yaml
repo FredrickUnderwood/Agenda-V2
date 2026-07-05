@@ -1,7 +1,6 @@
 # agenda-v2 config template. Copy to ~/.config/agenda-v2/agenda-v2.yaml (or
-# pass --config) and fill in the blanks. Schema is NOT auto-migrated — apply
-# resources/migrations/*.sql by hand before starting the server the first
-# time (see resources/migrations/README.md).
+# pass --config) and fill in the blanks. The schema is auto-migrated on startup
+# from the Go models, so just point `database.dsn` at an empty database and run.
 
 server:
   addr: ":8080"

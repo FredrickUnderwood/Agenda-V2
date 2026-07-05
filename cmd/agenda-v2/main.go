@@ -37,11 +37,14 @@ func main() {
 	logger.Init(logger.Config{Level: cfg.Log.Level})
 	defer logger.Shutdown()
 
-	// Schema is managed exclusively via resources/migrations/*.sql, applied
-	// out of band before the server starts (see resources/migrations/README).
 	db, err := repository.OpenMySQL(cfg.Database.DSN)
 	if err != nil {
 		logger.L().Fatal("failed to open database", zap.Error(err))
+	}
+	// Create/update the schema from the domain models so a fresh install works
+	// with no manual SQL. AutoMigrate is additive (never drops), safe on restart.
+	if err := repository.Migrate(db); err != nil {
+		logger.L().Fatal("failed to migrate database", zap.Error(err))
 	}
 
 	rdb, err := repository.OpenRedis(cfg.Redis)
