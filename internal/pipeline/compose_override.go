@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
 // AgendaContainerLogDir is the in-container log directory that the SDK reads

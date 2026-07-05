@@ -1,4 +1,4 @@
-package gateway
+package gatewayclient
 
 import (
 	"bytes"
@@ -12,7 +12,8 @@ import (
 
 	"github.com/bytedance/sonic"
 
-	"github.com/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 )
 
 const serviceTokenHeader = "X-Service-Token"
@@ -35,32 +36,7 @@ func NewClient(cfg config.GatewayConfig) *Client {
 	}
 }
 
-type UpsertRouteRequest struct {
-	ApplicationID      int64          `json:"application_id"`
-	ServiceName        string         `json:"service_name"`
-	Env                string         `json:"env"`
-	Host               string         `json:"host"`
-	PathPrefix         string         `json:"path_prefix"`
-	StripPrefix        bool           `json:"strip_prefix"`
-	ReleaseID          string         `json:"release_id"`
-	Status             string         `json:"status"`
-	InstanceSelectMode string         `json:"instance_select_mode,omitempty"`
-	InstanceHeader     string         `json:"instance_header,omitempty"`
-	Operator           string         `json:"operator"`
-	Reason             string         `json:"reason"`
-	Backends           []BackendEntry `json:"backends"`
-}
-
-type BackendEntry struct {
-	TargetKey    string `json:"target_key"`
-	InstanceName string `json:"instance_name,omitempty"`
-	URL          string `json:"url"`
-	Weight       int    `json:"weight"`
-	Enabled      bool   `json:"enabled"`
-	Healthy      bool   `json:"healthy"`
-}
-
-func (c *Client) UpsertRoute(ctx context.Context, routeKey string, req UpsertRouteRequest) error {
+func (c *Client) UpsertRoute(ctx context.Context, routeKey string, req contract.UpsertRouteRequest) error {
 	if c == nil || c.baseURL == "" {
 		return errors.New("gateway base_url is required")
 	}

@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/internal/logger"
-	"github.com/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 // checkBatchTimeout bounds one CheckDueTargets pass as a whole (a backstop

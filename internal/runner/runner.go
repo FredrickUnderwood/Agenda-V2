@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/config"
 )
 
 // procGroupWaitDelay bounds how long Cmd.Wait blocks after the context is

@@ -6,7 +6,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/config"
 )
 
 func OpenRedis(cfg config.RedisConfig) (*redis.Client, error) {

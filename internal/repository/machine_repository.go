@@ -6,8 +6,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 )
 
 type MachineRepository struct{ db *gorm.DB }

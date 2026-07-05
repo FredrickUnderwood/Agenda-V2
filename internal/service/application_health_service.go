@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/repository"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
 )
 
 type ApplicationHealthService struct {

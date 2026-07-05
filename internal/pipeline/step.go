@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 )
 
 // Step is one node in a pipeline. Implementations write their output to

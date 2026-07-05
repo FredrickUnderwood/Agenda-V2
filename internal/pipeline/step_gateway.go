@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/agenda-v2/internal/gateway"
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/gatewayclient"
 )
 
 type GatewayRouteSyncStep struct {
-	Client        *gateway.Client
+	Client        *gatewayclient.Client
 	ApplicationID int64
 	ServiceName   string
 	Env           string
@@ -48,20 +49,22 @@ func (s *GatewayRouteSyncStep) Execute(ctx context.Context, rc *RunContext) erro
 		if route.Enabled {
 			status = "enabled"
 		}
-		backends := make([]gateway.BackendEntry, 0, len(route.Backends))
+		backends := make([]contract.BackendEntry, 0, len(route.Backends))
 		urls := make([]string, 0, len(route.Backends))
 		for _, backend := range route.Backends {
-			backends = append(backends, gateway.BackendEntry{
+			enabled := route.Enabled
+			healthy := backend.Healthy
+			backends = append(backends, contract.BackendEntry{
 				TargetKey:    backend.TargetKey,
 				InstanceName: backend.InstanceName,
 				URL:          backend.URL,
 				Weight:       backend.Weight,
-				Enabled:      route.Enabled,
-				Healthy:      backend.Healthy,
+				Enabled:      &enabled,
+				Healthy:      &healthy,
 			})
 			urls = append(urls, backend.URL)
 		}
-		req := gateway.UpsertRouteRequest{
+		req := contract.UpsertRouteRequest{
 			ApplicationID:      s.ApplicationID,
 			ServiceName:        s.ServiceName,
 			Env:                s.Env,

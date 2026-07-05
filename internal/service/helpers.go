@@ -4,7 +4,7 @@ import (
 	"github.com/bytedance/sonic"
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 )
 
 func sonicMarshal(v interface{}) (string, error) {

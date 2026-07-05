@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/repository"
-	"github.com/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
+	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
 type MachineService struct {

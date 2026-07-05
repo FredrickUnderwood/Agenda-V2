@@ -6,12 +6,12 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/gateway"
-	"github.com/agenda-v2/internal/git"
-	"github.com/agenda-v2/internal/service"
-	"github.com/agenda-v2/internal/util"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/gatewayclient"
+	"github.com/FredrickUnderwood/agenda-v2/internal/git"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
 
 // MachineGetter resolves a DB-managed machine by ID.
@@ -311,7 +311,7 @@ func (b *Builder) buildGatewayRouteSync(ctx context.Context, target *domain.Depl
 		Name: "gateway_routes_sync",
 		Type: domain.StepTypeGatewayRouteSync,
 		Exec: &GatewayRouteSyncStep{
-			Client:        gateway.NewClient(b.cfg.Gateway),
+			Client:        gatewayclient.NewClient(b.cfg.Gateway),
 			ApplicationID: target.App.ID,
 			ServiceName:   target.App.Name,
 			Env:           string(target.Env()),

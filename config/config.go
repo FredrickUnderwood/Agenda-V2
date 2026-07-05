@@ -17,8 +17,19 @@ type Config struct {
 	Deploy        DeployConfig             `yaml:"deploy"`
 	Gateway       GatewayConfig            `yaml:"gateway"`
 	Log           LogConfig                `yaml:"log"`
+	Security      SecurityConfig           `yaml:"security"`
 	Machines      map[string]MachineConfig `yaml:"machines"`
 	WorkspaceRoot string                   `yaml:"workspace_root"`
+}
+
+// SecurityConfig holds bootstrap secrets that must exist before the DB is
+// reachable, so they cannot themselves live in the Setting table.
+type SecurityConfig struct {
+	// MasterKey encrypts secret Settings at rest (AES-256-GCM, key = SHA-256 of
+	// this string). Keep it out of source control. Rotating it makes existing
+	// encrypted secrets unreadable. Empty disables encryption — secrets are then
+	// stored in plaintext and a warning is logged.
+	MasterKey string `yaml:"master_key"`
 }
 
 type RedisConfig struct {
@@ -71,6 +82,14 @@ type GitConfig struct {
 	Tokens           map[string]string `yaml:"tokens"`
 	GitBin           string            `yaml:"git_bin"`
 	OperationTimeout duration          `yaml:"operation_timeout"`
+
+	// TokenResolver, when set, is consulted before the static Tokens map so a
+	// git token (e.g. a GitHub PAT) can be rotated at runtime from the Setting
+	// table without restarting. Wired at startup by the server; not serialized.
+	TokenResolver func(host string) string `yaml:"-"`
+	// SecretValues, when set, returns every secret string that must be redacted
+	// from git output and logs (a superset of Tokens). Not serialized.
+	SecretValues func() []string `yaml:"-"`
 }
 
 type DeployConfig struct {

@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 func (s *Server) getApplicationEnvironment(c *gin.Context) {

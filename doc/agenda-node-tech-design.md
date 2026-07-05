@@ -61,7 +61,7 @@ graph LR
     N -- "POST /api/v1/machines/:id/heartbeat (X-Agenda-Node-Token)" --> A
 ```
 
-- **同仓库、不同进程**：`agenda-node` 是 `github.com/agenda-v2` 仓库里新增的第二个二进制 `cmd/agenda-node`，和 `cmd/agenda-v2` 共享 `internal/runner`、`go.mod`，但独立编译、独立部署、独立生命周期——中控重启不影响已经在跑的 node，反之亦然。
+- **同仓库、不同进程**：`agenda-node` 是 `github.com/FredrickUnderwood/agenda-v2` 仓库里新增的第二个二进制 `cmd/agenda-node`，和 `cmd/agenda-v2` 共享 `internal/runner`、`go.mod`，但独立编译、独立部署、独立生命周期——中控重启不影响已经在跑的 node，反之亦然。
 - **三条通信方向，职责不对称**：
   - **中控 → node（下发）**：`POST /v1/jobs` 下发一条命令，node 立即返回 `job_id`（异步受理，不等命令跑完）。
   - **中控 → node（轮询）**：`GET /v1/jobs/:job_id` 按间隔轮询，直到命令跑到终态。对 pipeline 层而言，"下发+轮询"这两步被封装在 `agentRunner` 内部、合并成一次看起来依旧同步的 `RunCmd` 调用——替代的是今天 `sshRunner` 的角色，细节见 4.1/4.2。

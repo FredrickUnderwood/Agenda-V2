@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
 // composeEnv builds the env slice passed to docker compose. Port > 0 surfaces

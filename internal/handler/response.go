@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 )
 
 // Success writes a 200 with the given payload.

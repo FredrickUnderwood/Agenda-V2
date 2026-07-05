@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 func (s *Server) listMachines(c *gin.Context) {

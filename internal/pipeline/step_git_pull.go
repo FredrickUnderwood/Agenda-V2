@@ -3,8 +3,8 @@ package pipeline
 import (
 	"context"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/git"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/git"
 )
 
 // GitPullStep clones or fast-forwards the repo on the target machine, then

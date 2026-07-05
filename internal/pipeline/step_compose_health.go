@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
 const (

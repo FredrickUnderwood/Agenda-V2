@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/logger"
-	"github.com/agenda-v2/internal/repository"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
 )
 
 // ApplicationReleaseService owns the ApplicationRelease state machine:

@@ -4,8 +4,8 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
 // ShellStep runs a sequence of raw shell commands on the target machine.

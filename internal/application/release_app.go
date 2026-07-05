@@ -8,11 +8,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/domain"
-	"github.com/agenda-v2/internal/logger"
-	"github.com/agenda-v2/internal/pipeline"
-	"github.com/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/pipeline"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 // ReleaseApplication is the sole deploy-trigger orchestrator in this build:

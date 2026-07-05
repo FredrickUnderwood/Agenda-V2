@@ -8,10 +8,10 @@ import (
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/application"
-	"github.com/agenda-v2/internal/logger"
-	"github.com/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/application"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 type Server struct {
@@ -23,6 +23,7 @@ type Server struct {
 	releaseSvc *service.ApplicationReleaseService
 	machineSvc *service.MachineService
 	logSvc     *service.DeployLogService
+	settingSvc *service.SettingService
 	releaseApp *application.ReleaseApplication
 	httpServer *http.Server
 }
@@ -35,13 +36,14 @@ func NewServer(
 	releaseSvc *service.ApplicationReleaseService,
 	machineSvc *service.MachineService,
 	logSvc *service.DeployLogService,
+	settingSvc *service.SettingService,
 	releaseApp *application.ReleaseApplication,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
 		cfg: cfg, engine: gin.New(),
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc,
-		machineSvc: machineSvc, logSvc: logSvc, releaseApp: releaseApp,
+		machineSvc: machineSvc, logSvc: logSvc, settingSvc: settingSvc, releaseApp: releaseApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
 	s.engine.Use(ginzap.RecoveryWithZap(logger.L(), true))
@@ -103,6 +105,13 @@ func (s *Server) registerRoutes() {
 		machines.PUT("/:machineID", s.updateMachine)
 		machines.DELETE("/:machineID", s.deleteMachine)
 		machines.POST("/:machineID/test", s.testMachineConnection)
+	}
+
+	settings := v1.Group("/settings")
+	{
+		settings.GET("", s.listSettings)
+		settings.PUT("/:key", s.upsertSetting)
+		settings.DELETE("/:key", s.deleteSetting)
 	}
 }
 

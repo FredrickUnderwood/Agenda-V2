@@ -13,13 +13,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/application"
-	"github.com/agenda-v2/internal/handler"
-	"github.com/agenda-v2/internal/logger"
-	"github.com/agenda-v2/internal/pipeline"
-	"github.com/agenda-v2/internal/repository"
-	"github.com/agenda-v2/internal/service"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/application"
+	"github.com/FredrickUnderwood/agenda-v2/internal/handler"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/pipeline"
+	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
+	"github.com/FredrickUnderwood/agenda-v2/internal/secret"
+	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
 func main() {
@@ -59,6 +60,7 @@ func main() {
 	machineRepo := repository.NewMachineRepository(db)
 	logRepo := repository.NewDeployLogRepository(db)
 	stepRepo := repository.NewPipelineStepRepository(db)
+	settingRepo := repository.NewSettingRepository(db)
 
 	// Service
 	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
@@ -69,6 +71,14 @@ func main() {
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)
+	settingSvc := service.NewSettingService(settingRepo, secret.NewBox(cfg.Security.MasterKey))
+	if err := settingSvc.Load(context.Background()); err != nil {
+		logger.L().Warn("failed to load settings from db; falling back to yaml config (has migration 0002_setting.sql been applied?)", zap.Error(err))
+	}
+	// Route git token lookups through the Setting table so tokens can rotate at
+	// runtime; the static yaml git.tokens map remains as a bootstrap fallback.
+	cfg.Git.TokenResolver = settingSvc.GitToken
+	cfg.Git.SecretValues = settingSvc.SecretValues
 
 	// Pipeline
 	builder := pipeline.NewBuilder(cfg, machineSvc, appSvc, appEnvironmentSvc)
@@ -82,7 +92,7 @@ func main() {
 	defer healthMonitor.Stop()
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, releaseApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, settingSvc, releaseApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

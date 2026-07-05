@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/agenda-v2/config"
-	"github.com/agenda-v2/internal/logger"
-	"github.com/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
 // FetchRemoteSHA returns the current commit SHA of the given branch.
@@ -139,11 +139,19 @@ func cmdOutput(buf *bytes.Buffer, err error) string {
 }
 
 // redactTokens strips any configured git token from s so credentials never
-// leak into logs or error strings.
+// leak into logs or error strings. It scrubs both the static yaml tokens and,
+// when wired, every secret value known to the Setting table.
 func redactTokens(s string, cfg *config.Config) string {
 	for _, t := range cfg.Git.Tokens {
 		if t != "" {
 			s = strings.ReplaceAll(s, t, "***")
+		}
+	}
+	if cfg.Git.SecretValues != nil {
+		for _, t := range cfg.Git.SecretValues() {
+			if t != "" {
+				s = strings.ReplaceAll(s, t, "***")
+			}
 		}
 	}
 	return s
@@ -240,11 +248,20 @@ func injectToken(rawURL string, cfg *config.Config) (string, error) {
 	if u.User != nil {
 		return rawURL, nil
 	}
-	token, ok := cfg.Git.Tokens[u.Hostname()]
-	if !ok || token == "" {
+	host := u.Hostname()
+	// Prefer the runtime resolver (Setting table, rotatable without restart),
+	// fall back to the static yaml tokens for bootstrap.
+	token := ""
+	if cfg.Git.TokenResolver != nil {
+		token = cfg.Git.TokenResolver(host)
+	}
+	if token == "" {
+		token = cfg.Git.Tokens[host]
+	}
+	if token == "" {
 		logger.L().Warn("no git token configured for host; private repos will fail with 401/403",
-			zap.String("host", u.Hostname()),
-			zap.String("hint", "add git.tokens."+u.Hostname()+" to agenda-v2.yaml if this repo is private"),
+			zap.String("host", host),
+			zap.String("hint", "set setting git.token."+host+" (or add git.tokens."+host+" to agenda-v2.yaml) if this repo is private"),
 		)
 		return rawURL, nil
 	}

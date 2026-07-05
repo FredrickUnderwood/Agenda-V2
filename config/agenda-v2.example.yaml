@@ -20,6 +20,10 @@ redis:
 git:
   git_bin: "git"
   operation_timeout: "60s"
+  # Static bootstrap tokens (host: token). These are a fallback; the preferred
+  # place for a rotating token is the Setting table — set it at runtime via
+  #   PUT /api/v1/settings/git.token.github.com  {"value":"ghp_xxx","is_secret":true}
+  # which takes effect without a restart and is stored encrypted at rest.
   tokens: {}
     # github.com: "ghp_xxx"
 
@@ -37,6 +41,12 @@ gateway:
 
 log:
   level: "info"
+
+security:
+  # Encrypts secret Settings at rest (AES-256-GCM). Keep this out of source
+  # control and back it up: rotating it makes existing encrypted secrets
+  # unreadable. Empty disables encryption (secrets stored in plaintext + warning).
+  master_key: ""
 
 workspace_root: "~/.agenda-v2/workspaces"
 
