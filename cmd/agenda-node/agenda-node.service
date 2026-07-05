@@ -1,0 +1,26 @@
+# systemd unit for agenda-node — the recommended way to run the agent on a host.
+# Install:
+#   sudo cp agenda-node /usr/local/bin/
+#   sudo mkdir -p /etc/agenda-node && sudo cp agenda-node.yaml /etc/agenda-node/
+#   sudo cp agenda-node.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now agenda-node
+#
+# Restart=always is important: if the node crashes, its in-memory job table and
+# proxy registry are lost, so systemd restarting it promptly minimizes the
+# window where deployments and gateway-proxied traffic on this machine fail.
+[Unit]
+Description=agenda-node deploy agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agenda-node --config /etc/agenda-node/agenda-node.yaml
+Restart=always
+RestartSec=2
+# The node runs git and docker compose; run it as a user in the docker group
+# (or root) with access to the workspace root.
+User=root
+
+[Install]
+WantedBy=multi-user.target

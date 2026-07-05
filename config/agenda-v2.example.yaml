@@ -29,6 +29,7 @@ git:
 deploy:
   max_output_bytes: 65536
   default_timeout: "5m"
+  agent_poll_interval: "2s"   # how often the control plane polls an agenda-node for job status
 
 gateway:
   enabled: false
@@ -61,11 +62,21 @@ auth:
 
 workspace_root: "~/.agenda-v2/workspaces"
 
+# Machines are usually managed in the DB (via the API), but may also be declared
+# here. `mode` selects how the control plane reaches each one.
 machines: {}
-  # prod-1:
+  # prod-1-ssh:                         # classic SSH mode (default)
   #   machine_type: prod
+  #   mode: ssh
   #   host: 10.0.0.10
   #   user: deploy
   #   port: 22
   #   ssh_key_path: "~/.ssh/id_rsa"
+  #   workspace_root: "/root/.agenda-v2/workspaces"
+  # prod-1-agent:                       # agenda-node agent mode (no SSH creds needed)
+  #   machine_type: prod
+  #   mode: agent
+  #   agent_base_url: "http://10.0.0.10:7100"        # node management port
+  #   agent_proxy_base_url: "http://10.0.0.10:7200"  # node reverse-proxy port (gateway backends point here)
+  #   agent_token: "replace-with-random-secret"      # must match this machine's agenda-node.yaml token
   #   workspace_root: "/root/.agenda-v2/workspaces"

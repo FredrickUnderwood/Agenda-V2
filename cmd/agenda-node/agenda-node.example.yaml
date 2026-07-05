@@ -1,0 +1,25 @@
+# agenda-node configuration. Copy to config/agenda-node.yaml (compose) or
+# /etc/agenda-node/agenda-node.yaml (systemd) and fill in the blanks.
+
+# Management API: /v1/jobs, /v1/proxy, /v1/health. Bind to a private interface —
+# it is equivalent to remote code execution. Restrict access to the control
+# plane's IP with a host firewall.
+listen_addr: "0.0.0.0:7100"
+
+# Reverse-proxy port that agenda-gateway backends point at. Restrict to the
+# gateway's IP.
+proxy_listen_addr: "0.0.0.0:7200"
+
+# The control plane's machine.id this node represents (coordinate with agenda-v2).
+machine_id: 0
+
+# Shared per-machine secret; must equal this machine's machine.agent_token in the
+# control plane. Generate a random value, e.g. `openssl rand -hex 32`.
+token: "replace-with-random-secret"
+
+# Control plane base URL, for heartbeats.
+central_base_url: "http://10.0.0.1:8080"
+
+heartbeat_interval: "15s"
+max_output_bytes: 65536
+job_retention: "1h" # how long finished jobs stay in memory before GC
