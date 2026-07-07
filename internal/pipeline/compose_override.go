@@ -12,13 +12,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
-
-// AgendaContainerLogDir is the in-container log directory that the SDK reads
-// from AGENDA_LOG_DIR. agenda mounts <LocalPath>/logs onto this path so the
-// host can `cat` the same files the container is writing.
-const AgendaContainerLogDir = "/var/log/agenda"
 
 // agendaOverrideRelPath is the override file path under LocalPath. Kept under
 // a dot-prefixed dir so it doesn't pollute the user's repo working tree.
@@ -45,7 +41,14 @@ func composeServiceNames(raw []byte) ([]string, error) {
 // vars plus any user-defined env vars from userEnv. Keys starting with
 // AGENDA_ are silently dropped so the SDK contract can't be broken by a
 // misconfigured app.
-func buildOverrideYAML(mountSource, appName, branch string, services []string, userEnv map[string]string) ([]byte, error) {
+//
+// instanceName and each service's own name are injected as
+// AGENDA_INSTANCE_NAME / AGENDA_SERVICE_NAME so the SDK's file log sink can
+// build a collision-free filename: the mounted log directory is shared by
+// every service in this compose file, and — since resolveLocalPath keys only
+// on repo+branch+machine, not env/instance — can also be shared across
+// different deploy-target instances of the same app/branch on one machine.
+func buildOverrideYAML(mountSource, appName, branch, instanceName string, services []string, userEnv map[string]string) ([]byte, error) {
 	type svc struct {
 		Volumes     []string `yaml:"volumes"`
 		Environment []string `yaml:"environment"`
@@ -60,15 +63,17 @@ func buildOverrideYAML(mountSource, appName, branch string, services []string, u
 	}
 	sort.Strings(userKeys)
 
-	buildEnv := func() []string {
-		env := make([]string, 0, len(userKeys)+3)
+	buildEnv := func(serviceName string) []string {
+		env := make([]string, 0, len(userKeys)+4)
 		for _, k := range userKeys {
 			env = append(env, k+"="+userEnv[k])
 		}
 		env = append(env,
 			"AGENDA_APP_NAME="+appName,
-			"AGENDA_LOG_DIR="+AgendaContainerLogDir,
+			"AGENDA_LOG_DIR="+contract.AgendaContainerLogDir,
 			"AGENDA_REPO_BRANCH="+branch,
+			"AGENDA_INSTANCE_NAME="+instanceName,
+			"AGENDA_SERVICE_NAME="+serviceName,
 		)
 		return env
 	}
@@ -78,8 +83,8 @@ func buildOverrideYAML(mountSource, appName, branch string, services []string, u
 			m := make(map[string]svc, len(services))
 			for _, name := range services {
 				m[name] = svc{
-					Volumes:     []string{mountSource + ":" + AgendaContainerLogDir},
-					Environment: buildEnv(),
+					Volumes:     []string{mountSource + ":" + contract.AgendaContainerLogDir},
+					Environment: buildEnv(name),
 				}
 			}
 			return m
@@ -138,7 +143,7 @@ func ensureRemoteDir(ctx context.Context, r runner.Runner, path string) error {
 func writeAgendaOverride(
 	ctx context.Context,
 	machine *config.MachineConfig,
-	localPath, composeFile, workDir, appName, branch string,
+	localPath, composeFile, workDir, appName, branch, instanceName string,
 	servicesFilter []string,
 	userEnv map[string]string,
 ) (string, error) {
@@ -172,7 +177,7 @@ func writeAgendaOverride(
 		return "", errors.New("no services to augment in " + composeAbs)
 	}
 
-	overrideYAML, err := buildOverrideYAML(composeMountSource(workDir), appName, branch, targets, userEnv)
+	overrideYAML, err := buildOverrideYAML(composeMountSource(workDir), appName, branch, instanceName, targets, userEnv)
 	if err != nil {
 		return "", err
 	}

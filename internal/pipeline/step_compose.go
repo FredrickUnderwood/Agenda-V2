@@ -41,8 +41,9 @@ func (s *ComposePullStep) Execute(ctx context.Context, rc *RunContext) error {
 // Before invoking compose, it writes an agenda-managed override file
 // (<LocalPath>/.agenda/compose.override.yml) that mounts <LocalPath>/logs
 // into each target service at /var/log/agenda and injects
-// AGENDA_APP_NAME / AGENDA_LOG_DIR / AGENDA_REPO_BRANCH plus the merged
-// (application < env < instance) user env vars.
+// AGENDA_APP_NAME / AGENDA_LOG_DIR / AGENDA_REPO_BRANCH / AGENDA_INSTANCE_NAME
+// / AGENDA_SERVICE_NAME plus the merged (application < env < instance) user
+// env vars.
 type ComposeUpStep struct {
 	Machine     *config.MachineConfig
 	WorkDir     string
@@ -51,8 +52,9 @@ type ComposeUpStep struct {
 	Port        int
 	Services    []string
 
-	AppName string
-	Branch  string
+	AppName      string
+	Branch       string
+	InstanceName string
 
 	// Env is the fully merged env var map (application baseline < env-level
 	// override < instance-level override) baked into the override file.
@@ -63,7 +65,7 @@ func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
 	overridePath, err := writeAgendaOverride(
 		ctx, s.Machine,
 		rc.LocalPath, s.ComposeFile, s.WorkDir,
-		s.AppName, s.Branch,
+		s.AppName, s.Branch, s.InstanceName,
 		s.Services,
 		s.Env,
 	)

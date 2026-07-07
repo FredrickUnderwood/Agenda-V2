@@ -72,6 +72,7 @@ func main() {
 	appHealthSvc := service.NewApplicationHealthService(appTargetRepo, appHealthRepo, machineRepo)
 	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
 	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
+	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineRepo, cfg.WorkspaceRoot)
 	machineSvc := service.NewMachineService(machineRepo)
 	machineSvc.SetAgentPollInterval(cfg.Deploy.AgentPollInterval.Duration)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
@@ -103,7 +104,7 @@ func main() {
 	defer healthMonitor.Stop()
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, settingSvc, userSvc, authMgr, releaseApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, appLogSvc, settingSvc, userSvc, authMgr, releaseApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

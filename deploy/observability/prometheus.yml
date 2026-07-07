@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: agenda-gateway
+    metrics_path: /-/metrics
+    static_configs:
+      # Edit this if your gateway isn't reachable at host.docker.internal:8080
+      # (e.g. it's on another machine, or GATEWAY_ADDR is non-default).
+      - targets: ["host.docker.internal:8080"]

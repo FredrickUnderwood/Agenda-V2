@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/metrics"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/service"
 	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"go.uber.org/zap"
@@ -131,7 +132,17 @@ func (a *GatewayApplication) ServeProxy(w http.ResponseWriter, r *http.Request, 
 		)
 		http.Error(rw, "bad gateway", http.StatusBadGateway)
 	}
-	proxy.ServeHTTP(w, r.WithContext(ctx))
+
+	rec := metrics.WrapResponseWriter(w)
+	start := time.Now()
+	proxy.ServeHTTP(rec, r.WithContext(ctx))
+
+	metrics.RequestsTotal.WithLabelValues(
+		route.RouteKey, route.ServiceName, route.Env, backend.InstanceName, r.Method, metrics.StatusClass(rec.Status()),
+	).Inc()
+	metrics.RequestDuration.WithLabelValues(
+		route.RouteKey, route.ServiceName, route.Env, backend.InstanceName, r.Method,
+	).Observe(time.Since(start).Seconds())
 }
 
 // Match finds the route for host/path and picks a backend. When

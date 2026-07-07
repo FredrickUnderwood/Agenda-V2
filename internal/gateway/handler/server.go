@@ -14,6 +14,7 @@ import (
 	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gorm.io/gorm"
 )
 
@@ -62,6 +63,7 @@ func NewServer(
 func (s *Server) registerRoutes() {
 	s.engine.GET("/-/health", s.health)
 	s.engine.GET("/-/ready", s.ready)
+	s.engine.GET("/-/metrics", gin.WrapH(promhttp.Handler()))
 
 	routes := s.engine.Group("/-/routes")
 	routes.Use(s.authMiddleware())

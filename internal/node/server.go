@@ -5,6 +5,9 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +57,7 @@ func (s *Server) registerRoutes() {
 		v1.GET("/jobs/:job_id", s.getJob)
 		v1.DELETE("/jobs/:job_id", s.deleteJob)
 		v1.PUT("/proxy/:instance", s.registerProxy)
+		v1.GET("/logs/:app/:instance", s.getLogs)
 	}
 }
 
@@ -141,4 +145,66 @@ func (s *Server) registerProxy(c *gin.Context) {
 	}
 	s.registry.Set(instance, req.Port)
 	c.JSON(http.StatusOK, gin.H{"instance": instance, "port": req.Port})
+}
+
+// defaultLogTailLines / maxLogTailLines bound the ?tail= query so a client
+// can't force the node to scan an unbounded number of lines per file.
+const (
+	defaultLogTailLines = 200
+	maxLogTailLines     = 5000
+)
+
+// getLogs reads log files from the given host-side directory (the "dir"
+// query param — the same absolute path the control plane already resolves
+// for job dispatch as NodeJobRequest.Dir, joined with "logs"; NOT
+// contract.AgendaContainerLogDir, which is only the in-container path a
+// deployed app's own container sees, not the host path this process runs on).
+func (s *Server) getLogs(c *gin.Context) {
+	app := c.Param("app")
+	instance := c.Param("instance")
+	dir := c.Query("dir")
+	if dir == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dir is required"})
+		return
+	}
+
+	tail := defaultLogTailLines
+	if v := c.Query("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tail = n
+		}
+	}
+	if tail > maxLogTailLines {
+		tail = maxLogTailLines
+	}
+	service := c.Query("service")
+
+	files, err := findLogFiles(dir, app, instance)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no logs found for " + app + "/" + instance})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	logs := make([]contract.NodeLogFile, 0, len(files))
+	for _, name := range files {
+		svc := serviceNameFromFile(name, app, instance)
+		if service != "" && svc != service {
+			continue
+		}
+		lines, err := tailLines(filepath.Join(dir, name), tail)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		logs = append(logs, contract.NodeLogFile{Service: svc, File: name, Lines: lines})
+	}
+	if len(logs) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no logs found for " + app + "/" + instance})
+		return
+	}
+	c.JSON(http.StatusOK, contract.NodeLogsResponse{App: app, Instance: instance, Logs: logs})
 }

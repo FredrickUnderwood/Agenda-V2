@@ -7,16 +7,46 @@ package log
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Config configures the process logger. AppName, when set, is attached as a
 // field to every log line so multi-service log streams stay attributable.
+//
+// LogDir, when set (or via the AGENDA_LOG_DIR env var the platform injects
+// into deployed app containers), adds a rotating JSON-lines file sink at
+// <LogDir>/<AppName>[__<InstanceName>][__<ServiceName>].log alongside
+// stderr. Leaving both unset keeps today's stderr-only behavior unchanged.
+//
+// InstanceName and ServiceName disambiguate the log file when one mounted
+// log directory is shared by more than one deploy target (InstanceName,
+// e.g. a blue/green slot — env AGENDA_INSTANCE_NAME) and/or more than one
+// container of a multi-service compose app (ServiceName — env
+// AGENDA_SERVICE_NAME). Both are platform-injected; most single-service,
+// single-instance apps will only ever see LogDir/AppName populated.
 type Config struct {
-	AppName string
-	Level   string
+	AppName      string
+	Level        string
+	LogDir       string
+	InstanceName string
+	ServiceName  string
+}
+
+// firstNonEmpty returns the first non-empty value, letting an explicit Config
+// field win over the platform-injected env var of the same name.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 var (
@@ -32,6 +62,11 @@ var (
 
 // Init builds the process logger from cfg. Safe to call again to reconfigure.
 func Init(cfg Config) error {
+	appName := firstNonEmpty(cfg.AppName, os.Getenv("AGENDA_APP_NAME"))
+	logDir := firstNonEmpty(cfg.LogDir, os.Getenv("AGENDA_LOG_DIR"))
+	instanceName := firstNonEmpty(cfg.InstanceName, os.Getenv("AGENDA_INSTANCE_NAME"))
+	serviceName := firstNonEmpty(cfg.ServiceName, os.Getenv("AGENDA_SERVICE_NAME"))
+
 	zcfg := zap.NewProductionConfig()
 	if cfg.Level != "" {
 		var level zap.AtomicLevel
@@ -43,8 +78,31 @@ func Init(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if cfg.AppName != "" {
-		l = l.With(zap.String("app", cfg.AppName))
+	if logDir != "" {
+		fileName := appName
+		if fileName == "" {
+			fileName = "app"
+		}
+		if instanceName != "" {
+			fileName += "__" + instanceName
+		}
+		if serviceName != "" {
+			fileName += "__" + serviceName
+		}
+		fileSink := zapcore.AddSync(&lumberjack.Logger{
+			Filename:   filepath.Join(logDir, fileName+".log"),
+			MaxSize:    100, // megabytes
+			MaxBackups: 5,
+			MaxAge:     14, // days
+			Compress:   true,
+		})
+		l = l.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			fileCore := zapcore.NewCore(zapcore.NewJSONEncoder(zcfg.EncoderConfig), fileSink, zcfg.Level)
+			return zapcore.NewTee(core, fileCore)
+		}))
+	}
+	if appName != "" {
+		l = l.With(zap.String("app", appName))
 	}
 	mu.Lock()
 	logger = l

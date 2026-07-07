@@ -46,3 +46,26 @@ type NodeProxyRegisterRequest struct {
 type NodeHeartbeatRequest struct {
 	Version string `json:"version"`
 }
+
+// AgendaContainerLogDir is the in-container log directory that sdk/go/log
+// reads from AGENDA_LOG_DIR. The control plane's compose-override step
+// (internal/pipeline) mounts <LocalPath>/logs onto this path on the deploy
+// target's machine, and agenda-node's log-tail endpoint reads from the same
+// path — defined once here so the two ends can't drift.
+const AgendaContainerLogDir = "/var/log/agenda"
+
+// NodeLogFile is one matched on-disk log file in the response of
+// GET /v1/logs/:app/:instance. Service is the AGENDA_SERVICE_NAME segment of
+// the filename (empty for single-service apps that never set it).
+type NodeLogFile struct {
+	Service string   `json:"service"`
+	File    string   `json:"file"`
+	Lines   []string `json:"lines"`
+}
+
+// NodeLogsResponse is the body of GET /v1/logs/:app/:instance.
+type NodeLogsResponse struct {
+	App      string        `json:"app"`
+	Instance string        `json:"instance"`
+	Logs     []NodeLogFile `json:"logs"`
+}

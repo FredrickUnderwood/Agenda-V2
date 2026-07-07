@@ -1,6 +1,7 @@
-// Package nodeproxy is a thin control-plane client for agenda-node's proxy
-// registration API (PUT /v1/proxy/:instance). It is kept separate from the
-// gateway client (which talks to agenda-gateway) to avoid conflating the two.
+// Package nodeproxy is a thin control-plane client for agenda-node's
+// management API (proxy registration, log tailing). It is kept separate from
+// the gateway client (which talks to agenda-gateway) to avoid conflating the
+// two.
 package nodeproxy
 
 import (
@@ -9,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,4 +50,55 @@ func RegisterProxyTarget(ctx context.Context, agentBaseURL, agentToken, instance
 		return errors.New("register proxy target failed: " + resp.Status + ": " + strings.TrimSpace(string(msg)))
 	}
 	return nil
+}
+
+// FetchLogs asks the node at agentBaseURL for the tail of every log file
+// matching app/instance under dir — the absolute host-side log directory the
+// control plane resolves the same way it resolves a deploy target's working
+// directory (see git.ResolveLocalPath), NOT contract.AgendaContainerLogDir
+// (that's only the path a deployed app's own container sees). service and
+// tail are optional (service == "" means "all services"; tail <= 0 leaves
+// the node's own default).
+func FetchLogs(ctx context.Context, agentBaseURL, agentToken, app, instance, dir, service string, tail int) (*contract.NodeLogsResponse, error) {
+	base := strings.TrimRight(agentBaseURL, "/")
+	if base == "" {
+		return nil, errors.New("agent_base_url is empty; cannot fetch logs")
+	}
+	u, err := url.Parse(base + "/v1/logs/" + url.PathEscape(app) + "/" + url.PathEscape(instance))
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("dir", dir)
+	if service != "" {
+		q.Set("service", service)
+	}
+	if tail > 0 {
+		q.Set("tail", strconv.Itoa(tail))
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(contract.HeaderNodeToken, agentToken)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.New("fetch logs failed: " + resp.Status + ": " + strings.TrimSpace(string(body)))
+	}
+	var out contract.NodeLogsResponse
+	if err := sonic.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

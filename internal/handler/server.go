@@ -24,6 +24,7 @@ type Server struct {
 	releaseSvc *service.ApplicationReleaseService
 	machineSvc *service.MachineService
 	logSvc     *service.DeployLogService
+	appLogSvc  *service.ApplicationLogService
 	settingSvc *service.SettingService
 	userSvc    *service.UserService
 	auth       *auth.Manager
@@ -39,6 +40,7 @@ func NewServer(
 	releaseSvc *service.ApplicationReleaseService,
 	machineSvc *service.MachineService,
 	logSvc *service.DeployLogService,
+	appLogSvc *service.ApplicationLogService,
 	settingSvc *service.SettingService,
 	userSvc *service.UserService,
 	authMgr *auth.Manager,
@@ -48,7 +50,7 @@ func NewServer(
 	s := &Server{
 		cfg: cfg, engine: gin.New(),
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc,
-		machineSvc: machineSvc, logSvc: logSvc, settingSvc: settingSvc,
+		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, settingSvc: settingSvc,
 		userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
@@ -95,6 +97,7 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:appID/instances", s.listApplicationInstances)
 		apps.GET("/:appID/instances/:targetID/health", s.getApplicationInstanceHealth)
 		apps.POST("/:appID/instances/:targetID/health/check", s.checkApplicationInstanceHealth)
+		apps.GET("/:appID/instances/:targetID/logs", s.getApplicationInstanceLogs)
 		apps.GET("/:appID/environments/:env", s.getApplicationEnvironment)
 		apps.PUT("/:appID/environments/:env", s.updateApplicationEnvironment)
 		apps.GET("/:appID/releases", s.listReleases)

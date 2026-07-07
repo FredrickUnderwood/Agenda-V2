@@ -1,0 +1,45 @@
+# Optional observability add-on: Prometheus scrapes agenda-gateway's
+# /-/metrics, Grafana visualizes it with a pre-provisioned "Gateway Overview"
+# dashboard (error rate + P99 latency by app). Independent of how/where the
+# gateway itself is deployed — bring this up wherever it can reach the
+# gateway over the network:
+#   docker compose -f deploy/observability/docker-compose.yml up -d
+#
+# Edit prometheus.yml's target if your gateway isn't at host.docker.internal:8080.
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      # Anonymous read-only access + embedding allowed so Grafana panels can be
+      # iframe-embedded in the agenda-v2 frontend without a separate Grafana
+      # login. Grafana is meant to sit behind the platform's own network
+      # boundary (or the gateway itself, as just another proxied backend) —
+      # don't expose port 3000 directly to the internet.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
+volumes:
+  prometheus-data:
+  grafana-data:
