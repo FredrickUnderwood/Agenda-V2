@@ -1,0 +1,136 @@
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/600.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+}
+
+.agenda-display {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.agenda-mono {
+  font-family:
+    'IBM Plex Mono',
+    'SFMono-Regular',
+    Consolas,
+    monospace;
+}
+
+/* Machine surface: dark, monospace panels for logs / pipeline output / raw
+   identifiers. This is the deliberate visual break from the light control
+   surface (see theme/tokens.ts for the rationale). */
+.agenda-terminal {
+  background: #14151a;
+  border: 1px solid #2b2e38;
+  border-radius: 8px;
+  color: #d7d9e0;
+  font-family:
+    'IBM Plex Mono',
+    'SFMono-Regular',
+    Consolas,
+    monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.agenda-terminal ::selection {
+  background: rgba(255, 138, 61, 0.35);
+}
+
+/* Status pill vocabulary, shared by release status, health status, machine
+   online status, gateway backend status. */
+.agenda-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.agenda-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.agenda-pill-verified {
+  background: rgba(47, 182, 115, 0.12);
+  color: #1c8a58;
+}
+.agenda-pill-verified .agenda-pill-dot {
+  background: #2fb673;
+}
+
+.agenda-pill-building {
+  background: rgba(255, 138, 61, 0.14);
+  color: #b25a1f;
+}
+.agenda-pill-building .agenda-pill-dot {
+  background: #ff8a3d;
+  animation: agenda-pulse 1.4s ease-in-out infinite;
+}
+
+.agenda-pill-failed {
+  background: rgba(229, 72, 77, 0.12);
+  color: #b8272b;
+}
+.agenda-pill-failed .agenda-pill-dot {
+  background: #e5484d;
+}
+
+.agenda-pill-idle {
+  background: rgba(107, 110, 122, 0.12);
+  color: #6b6e7a;
+}
+.agenda-pill-idle .agenda-pill-dot {
+  background: #9b9eaa;
+}
+
+@keyframes agenda-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agenda-pill-building .agenda-pill-dot {
+    animation: none;
+  }
+}
