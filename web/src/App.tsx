@@ -10,6 +10,7 @@ import { UsersPage } from '@/pages/admin/UsersPage'
 import { ApplicationDetailPage } from '@/pages/applications/ApplicationDetailPage'
 import { ApplicationsListPage } from '@/pages/applications/ApplicationsListPage'
 import { InstanceLogsPage } from '@/pages/applications/InstanceLogsPage'
+import { InboxPage } from '@/pages/InboxPage'
 import { MachinesListPage } from '@/pages/machines/MachinesListPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 
@@ -27,6 +28,7 @@ function App() {
                 <Route path="applications/:appId" element={<ApplicationDetailPage />} />
                 <Route path="applications/:appId/instances/:targetId/logs" element={<InstanceLogsPage />} />
                 <Route path="machines" element={<MachinesListPage />} />
+                <Route path="inbox" element={<InboxPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="admin/users" element={<UsersPage />} />
                 <Route path="me" element={<MePage />} />

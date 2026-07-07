@@ -10,6 +10,7 @@ import {
   LogoutOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '@/auth/AuthContext'
+import { NotificationBell } from '@/components/NotificationBell'
 import { color } from '@/theme/tokens'
 
 const { Sider, Header, Content } = Layout
@@ -67,10 +68,12 @@ export function AppLayout() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
+            gap: 20,
             padding: '0 24px',
             borderBottom: `1px solid ${color.paperBorder}`,
           }}
         >
+          <NotificationBell />
           <Dropdown menu={{ items: userMenu }} placement="bottomRight">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
               <Avatar size="small" style={{ background: color.signal }}>

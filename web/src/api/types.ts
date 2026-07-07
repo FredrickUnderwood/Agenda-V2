@@ -270,3 +270,15 @@ export interface ListResponse<T> {
   data: T[]
   total: number
 }
+
+export type NotificationLevel = 'info' | 'warning' | 'critical'
+
+export interface Notification {
+  id: number
+  title: string
+  content: string
+  level: NotificationLevel
+  is_read: boolean
+  created_at: string
+  updated_at: string
+}
