@@ -16,20 +16,22 @@ import (
 )
 
 type Server struct {
-	cfg        *config.Config
-	engine     *gin.Engine
-	appSvc     *service.ApplicationService
-	healthSvc  *service.ApplicationHealthService
-	envSvc     *service.ApplicationEnvironmentService
-	releaseSvc *service.ApplicationReleaseService
-	machineSvc *service.MachineService
-	logSvc     *service.DeployLogService
-	appLogSvc  *service.ApplicationLogService
-	settingSvc *service.SettingService
-	userSvc    *service.UserService
-	auth       *auth.Manager
-	releaseApp *application.ReleaseApplication
-	httpServer *http.Server
+	cfg             *config.Config
+	engine          *gin.Engine
+	appSvc          *service.ApplicationService
+	healthSvc       *service.ApplicationHealthService
+	envSvc          *service.ApplicationEnvironmentService
+	releaseSvc      *service.ApplicationReleaseService
+	machineSvc      *service.MachineService
+	logSvc          *service.DeployLogService
+	appLogSvc       *service.ApplicationLogService
+	settingSvc      *service.SettingService
+	alertSvc        *service.AlertService
+	notificationSvc *service.NotificationService
+	userSvc         *service.UserService
+	auth            *auth.Manager
+	releaseApp      *application.ReleaseApplication
+	httpServer      *http.Server
 }
 
 func NewServer(
@@ -42,6 +44,8 @@ func NewServer(
 	logSvc *service.DeployLogService,
 	appLogSvc *service.ApplicationLogService,
 	settingSvc *service.SettingService,
+	alertSvc *service.AlertService,
+	notificationSvc *service.NotificationService,
 	userSvc *service.UserService,
 	authMgr *auth.Manager,
 	releaseApp *application.ReleaseApplication,
@@ -51,7 +55,7 @@ func NewServer(
 		cfg: cfg, engine: gin.New(),
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc,
 		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, settingSvc: settingSvc,
-		userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
+		alertSvc: alertSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
 	s.engine.Use(ginzap.RecoveryWithZap(logger.L(), true))
@@ -86,6 +90,18 @@ func (s *Server) registerRoutes() {
 
 	v1.GET("/auth/me", s.me)
 	v1.GET("/config", s.getConfig)
+
+	// Notifications are the shared in-app inbox ("站内信") — any authenticated
+	// user can read/dismiss them, unlike Settings/Alerts which hold secrets or
+	// can trigger external sends.
+	notifications := v1.Group("/notifications")
+	{
+		notifications.GET("", s.listNotifications)
+		notifications.GET("/unread-count", s.getNotificationUnreadCount)
+		notifications.POST("/read-all", s.markAllNotificationsRead)
+		notifications.POST("/:notificationID/read", s.markNotificationRead)
+		notifications.DELETE("/:notificationID", s.deleteNotification)
+	}
 
 	apps := v1.Group("/applications")
 	{
@@ -134,6 +150,15 @@ func (s *Server) registerRoutes() {
 		settings.GET("", s.listSettings)
 		settings.PUT("/:key", s.upsertSetting)
 		settings.DELETE("/:key", s.deleteSetting)
+	}
+
+	// Alerts send to webhooks configured via Settings (alert.channel.<type>.<name>)
+	// — admin only, same reasoning as settings themselves holding secrets.
+	alerts := v1.Group("/alerts")
+	alerts.Use(s.requireAdmin())
+	{
+		alerts.POST("", s.sendAlert)
+		alerts.POST("/test", s.testAlert)
 	}
 
 	// User management — admin only.

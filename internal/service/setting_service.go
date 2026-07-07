@@ -81,6 +81,22 @@ func (s *SettingService) Get(key string) (string, bool) {
 	return c.value, ok
 }
 
+// GetByPrefix returns the decrypted values of every cached setting whose key
+// has the given prefix, keyed by full setting key. Used by consumers that
+// need to enumerate a whole namespace (e.g. AlertService's "alert.channel."
+// keys) rather than resolve one known key like GitToken does.
+func (s *SettingService) GetByPrefix(prefix string) map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]string)
+	for k, c := range s.cache {
+		if strings.HasPrefix(k, prefix) {
+			out[k] = c.value
+		}
+	}
+	return out
+}
+
 // SetSettingRequest is the input to Set.
 type SetSettingRequest struct {
 	Key      string             `json:"key"`
