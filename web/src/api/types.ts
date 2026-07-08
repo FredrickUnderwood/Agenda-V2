@@ -171,6 +171,17 @@ export interface CreateMachineRequest {
 
 export type UpdateMachineRequest = Partial<CreateMachineRequest>
 
+// Returned once by createMachine/rotateMachineToken when agenda generates or
+// rotates an agent_token — it cannot be recovered afterwards.
+export interface MachineCreateResult {
+  machine: Machine
+  agent_token?: string
+}
+
+export interface RotateTokenResult {
+  agent_token: string
+}
+
 export interface ApplicationRelease {
   id: number
   application_id: number

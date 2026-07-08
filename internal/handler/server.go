@@ -141,6 +141,7 @@ func (s *Server) registerRoutes() {
 		machines.PUT("/:machineID", s.updateMachine)
 		machines.DELETE("/:machineID", s.deleteMachine)
 		machines.POST("/:machineID/test", s.testMachineConnection)
+		machines.POST("/:machineID/rotate-token", s.rotateMachineToken)
 	}
 
 	// Settings hold secrets (tokens) — admin only.

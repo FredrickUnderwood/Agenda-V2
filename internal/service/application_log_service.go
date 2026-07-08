@@ -7,23 +7,32 @@ import (
 	"path/filepath"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/git"
 	"github.com/FredrickUnderwood/agenda-v2/internal/nodeproxy"
 	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
 )
 
+// machineGetter resolves a machine with its agent token already decrypted to
+// plaintext, ready to present to that machine's agenda-node — satisfied by
+// *MachineService.Get. A plain *repository.MachineRepository would return the
+// token still encrypted at rest, which breaks the outbound node call below.
+type machineGetter interface {
+	Get(ctx context.Context, id int64) (*domain.Machine, error)
+}
+
 // ApplicationLogService fetches a running instance's runtime logs (written by
 // sdk/go/log on the deployed app's own machine) from its agenda-node agent.
-// It reads Application/ApplicationEnvTarget/ApplicationRelease/Machine
-// directly via their repositories, for the same reason
-// ApplicationReleaseService does — plain point-in-time data assembly to
-// resolve which machine and host directory to ask, not business-logic
-// delegation.
+// It reads Application/ApplicationEnvTarget/ApplicationRelease directly via
+// their repositories, for the same reason ApplicationReleaseService does —
+// plain point-in-time data assembly to resolve which machine and host
+// directory to ask, not business-logic delegation. Machine goes through
+// machineGetter instead, since its agent_token needs decrypting (see below).
 type ApplicationLogService struct {
 	apps          *repository.ApplicationRepository
 	targets       *repository.ApplicationTargetRepository
 	releases      *repository.ApplicationReleaseRepository
-	machines      *repository.MachineRepository
+	machines      machineGetter
 	workspaceRoot string
 }
 
@@ -31,7 +40,7 @@ func NewApplicationLogService(
 	apps *repository.ApplicationRepository,
 	targets *repository.ApplicationTargetRepository,
 	releases *repository.ApplicationReleaseRepository,
-	machines *repository.MachineRepository,
+	machines machineGetter,
 	workspaceRoot string,
 ) *ApplicationLogService {
 	return &ApplicationLogService{apps: apps, targets: targets, releases: releases, machines: machines, workspaceRoot: workspaceRoot}
@@ -55,7 +64,7 @@ func (s *ApplicationLogService) GetInstanceLogs(ctx context.Context, appID, targ
 	if target.MachineID <= 0 {
 		return nil, errors.New("target has no machine assigned")
 	}
-	machine, err := s.machines.GetByID(ctx, target.MachineID)
+	machine, err := s.machines.Get(ctx, target.MachineID)
 	if err != nil {
 		return nil, err
 	}

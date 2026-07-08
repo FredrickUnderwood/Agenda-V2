@@ -11,6 +11,7 @@ export function MachinesListPage() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
+  const [revealToken, setRevealToken] = useState<string | null>(null)
   const [form] = Form.useForm<CreateMachineRequest>()
   const mode = Form.useWatch('mode', form)
 
@@ -18,11 +19,12 @@ export function MachinesListPage() {
 
   const createMutation = useMutation({
     mutationFn: (req: CreateMachineRequest) => api.createMachine(req),
-    onSuccess: () => {
+    onSuccess: (res) => {
       message.success('Machine added.')
       queryClient.invalidateQueries({ queryKey: ['machines'] })
       setModalOpen(false)
       form.resetFields()
+      if (res.agent_token) setRevealToken(res.agent_token)
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
@@ -39,6 +41,15 @@ export function MachinesListPage() {
   const testMutation = useMutation({
     mutationFn: (id: number) => api.testMachineConnection(id),
     onSuccess: (res) => (res.ok ? message.success('Connection OK.') : message.error(res.error ?? 'Connection failed.')),
+  })
+
+  const rotateMutation = useMutation({
+    mutationFn: (id: number) => api.rotateMachineToken(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['machines'] })
+      setRevealToken(res.agent_token)
+    },
+    onError: (err: unknown) => message.error(errorMessage(err)),
   })
 
   return (
@@ -82,11 +93,24 @@ export function MachinesListPage() {
             title: '',
             key: 'actions',
             render: (_, m) => (
-              <Popconfirm title="Remove this machine?" onConfirm={() => deleteMutation.mutate(m.id)}>
-                <Button size="small" danger>
-                  Remove
-                </Button>
-              </Popconfirm>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {m.mode === 'agent' && (
+                  <Popconfirm
+                    title="Rotate this machine's agent token?"
+                    description="The old token stops working immediately — update agenda-node.yaml on that machine and restart agenda-node."
+                    onConfirm={() => rotateMutation.mutate(m.id)}
+                  >
+                    <Button size="small" loading={rotateMutation.isPending && rotateMutation.variables === m.id}>
+                      Rotate token
+                    </Button>
+                  </Popconfirm>
+                )}
+                <Popconfirm title="Remove this machine?" onConfirm={() => deleteMutation.mutate(m.id)}>
+                  <Button size="small" danger>
+                    Remove
+                  </Button>
+                </Popconfirm>
+              </div>
             ),
           },
         ]}
@@ -131,7 +155,7 @@ export function MachinesListPage() {
               <Form.Item name="agent_proxy_base_url" label="Agent proxy base URL" extra="http://host:7200">
                 <Input className="agenda-mono" />
               </Form.Item>
-              <Form.Item name="agent_token" label="Agent token" rules={[{ required: true }]}>
+              <Form.Item name="agent_token" label="Agent token" extra="Leave blank to let agenda generate and manage this for you.">
                 <Input.Password />
               </Form.Item>
             </>
@@ -166,6 +190,22 @@ export function MachinesListPage() {
             <Input placeholder="/root/.agenda-v2/workspaces" className="agenda-mono" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Agent token"
+        open={revealToken !== null}
+        onOk={() => setRevealToken(null)}
+        onCancel={() => setRevealToken(null)}
+        okText="Done"
+        cancelButtonProps={{ style: { display: 'none' } }}
+      >
+        <Typography.Paragraph>
+          Shown once — copy it now. Paste it into this machine&apos;s <code>agenda-node.yaml</code> as <code>token</code> (alongside its <code>machine_id</code>), then start agenda-node.
+        </Typography.Paragraph>
+        <Typography.Paragraph code copyable={{ text: revealToken ?? '' }} className="agenda-mono">
+          {revealToken}
+        </Typography.Paragraph>
       </Modal>
     </div>
   )

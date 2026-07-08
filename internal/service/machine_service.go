@@ -3,13 +3,18 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/internal/secret"
 )
 
 // heartbeatInterval mirrors the node's default; used to derive online status.
@@ -32,11 +37,21 @@ type MachineRepo interface {
 
 type MachineService struct {
 	machines          MachineRepo
+	box               *secret.Box
 	agentPollInterval time.Duration
 }
 
-func NewMachineService(machines MachineRepo) *MachineService {
-	return &MachineService{machines: machines}
+func NewMachineService(machines MachineRepo, box *secret.Box) *MachineService {
+	return &MachineService{machines: machines, box: box}
+}
+
+// encryptAgentToken encrypts a plaintext agent token for storage, warning (like
+// SettingService.Set) when no master key is configured to encrypt it with.
+func (s *MachineService) encryptAgentToken(token string) (string, error) {
+	if !s.box.Enabled() {
+		logger.L().Warn("storing machine agent_token without encryption; set security.master_key to encrypt it at rest")
+	}
+	return s.box.Encrypt(token)
 }
 
 // SetAgentPollInterval wires the global deploy.agent_poll_interval so
@@ -62,10 +77,15 @@ type CreateMachineRequest struct {
 	AgentToken        string             `json:"agent_token"`
 }
 
-func (s *MachineService) Create(ctx context.Context, req CreateMachineRequest) (*domain.Machine, error) {
+// Create adds a machine. For agent-mode machines with no operator-supplied
+// AgentToken, one is generated server-side; whichever token is used, it is
+// encrypted before being persisted. The returned plaintext is only ever
+// available here (and from RotateAgentToken) — callers must show it to the
+// operator immediately, it cannot be recovered afterwards.
+func (s *MachineService) Create(ctx context.Context, req CreateMachineRequest) (*domain.Machine, string, error) {
 	req.MachineType = domain.DefaultEnvironment(req.MachineType)
 	if !req.MachineType.Valid() {
-		return nil, errors.New(fmt.Sprintf("invalid machine_type %q", req.MachineType))
+		return nil, "", errors.New(fmt.Sprintf("invalid machine_type %q", req.MachineType))
 	}
 	if req.AuthType == "" {
 		req.AuthType = domain.AuthTypeSSHKey
@@ -78,8 +98,27 @@ func (s *MachineService) Create(ctx context.Context, req CreateMachineRequest) (
 		mode = domain.MachineModeSSH
 	}
 	if err := validateMachineMode(mode, req.Host, req.AgentBaseURL); err != nil {
-		return nil, err
+		return nil, "", err
 	}
+
+	var plaintextToken string
+	var storedToken string
+	if mode == domain.MachineModeAgent {
+		plaintextToken = req.AgentToken
+		if plaintextToken == "" {
+			token, err := secret.GenerateToken()
+			if err != nil {
+				return nil, "", err
+			}
+			plaintextToken = token
+		}
+		enc, err := s.encryptAgentToken(plaintextToken)
+		if err != nil {
+			return nil, "", err
+		}
+		storedToken = enc
+	}
+
 	m := &domain.Machine{
 		Name:              req.Name,
 		MachineType:       req.MachineType,
@@ -93,13 +132,13 @@ func (s *MachineService) Create(ctx context.Context, req CreateMachineRequest) (
 		Mode:              mode,
 		AgentBaseURL:      req.AgentBaseURL,
 		AgentProxyBaseURL: req.AgentProxyBaseURL,
-		AgentToken:        req.AgentToken,
+		AgentToken:        storedToken,
 	}
 	if err := s.machines.Create(ctx, m); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	logStruct("machine created", m)
-	return m, nil
+	return m, plaintextToken, nil
 }
 
 // validateMachineMode enforces the minimum fields each mode needs: SSH needs a
@@ -120,8 +159,23 @@ func validateMachineMode(mode domain.MachineMode, host, agentBaseURL string) err
 	return nil
 }
 
+// Get returns a machine with AgentToken decrypted to plaintext — callers use
+// this (directly, or via ToMachineConfig/pipeline) to present the token to
+// that machine's agenda-node. GetView/ListViews intentionally do not decrypt:
+// AgentToken is json:"-" and never needs to leave the process from there.
 func (s *MachineService) Get(ctx context.Context, id int64) (*domain.Machine, error) {
-	return s.machines.GetByID(ctx, id)
+	m, err := s.machines.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if m.AgentToken != "" {
+		plain, err := s.box.Decrypt(m.AgentToken)
+		if err != nil {
+			return nil, err
+		}
+		m.AgentToken = plain
+	}
+	return m, nil
 }
 
 func (s *MachineService) GetByName(ctx context.Context, name string) (*domain.Machine, error) {
@@ -194,7 +248,11 @@ func (s *MachineService) Update(ctx context.Context, id int64, req UpdateMachine
 		m.AgentProxyBaseURL = *req.AgentProxyBaseURL
 	}
 	if req.AgentToken != "" {
-		m.AgentToken = req.AgentToken
+		enc, err := s.encryptAgentToken(req.AgentToken)
+		if err != nil {
+			return nil, err
+		}
+		m.AgentToken = enc
 	}
 	if err := validateMachineMode(m.Mode, m.Host, m.AgentBaseURL); err != nil {
 		return nil, err
@@ -214,10 +272,43 @@ func (s *MachineService) Heartbeat(ctx context.Context, id int64, token, version
 	if err != nil {
 		return err
 	}
-	if m.AgentToken == "" || m.AgentToken != token {
+	stored, err := s.box.Decrypt(m.AgentToken)
+	if err != nil {
+		logger.L().Warn("failed to decrypt machine agent_token", zap.Int64("machine_id", id), zap.Error(err))
+		return ErrInvalidCredentials
+	}
+	if stored == "" || subtle.ConstantTimeCompare([]byte(stored), []byte(token)) != 1 {
 		return ErrInvalidCredentials
 	}
 	return s.machines.UpdateHeartbeat(ctx, id, version, time.Now())
+}
+
+// RotateAgentToken generates a fresh agent token for an agent-mode machine,
+// persists it encrypted, and returns the plaintext once — the operator must
+// copy it into that machine's agenda-node.yaml and restart agenda-node. The
+// old token stops working immediately (no grace window).
+func (s *MachineService) RotateAgentToken(ctx context.Context, id int64) (string, error) {
+	m, err := s.machines.GetByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if m.Mode != domain.MachineModeAgent {
+		return "", errors.New("token rotation only applies to agent-mode machines")
+	}
+	token, err := secret.GenerateToken()
+	if err != nil {
+		return "", err
+	}
+	enc, err := s.encryptAgentToken(token)
+	if err != nil {
+		return "", err
+	}
+	m.AgentToken = enc
+	if err := s.machines.Update(ctx, m); err != nil {
+		return "", err
+	}
+	logStruct("machine agent token rotated", m)
+	return token, nil
 }
 
 func (s *MachineService) Delete(ctx context.Context, id int64) error {
@@ -225,7 +316,7 @@ func (s *MachineService) Delete(ctx context.Context, id int64) error {
 }
 
 func (s *MachineService) TestConnection(ctx context.Context, id int64) error {
-	m, err := s.machines.GetByID(ctx, id)
+	m, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}

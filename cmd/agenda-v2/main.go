@@ -69,17 +69,19 @@ func main() {
 	notificationRepo := repository.NewNotificationRepository(db)
 
 	// Service
+	secretBox := secret.NewBox(cfg.Security.MasterKey)
+
 	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
 	appHealthSvc := service.NewApplicationHealthService(appTargetRepo, appHealthRepo, machineRepo)
 	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
 	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
-	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineRepo, cfg.WorkspaceRoot)
-	machineSvc := service.NewMachineService(machineRepo)
+	machineSvc := service.NewMachineService(machineRepo, secretBox)
 	machineSvc.SetAgentPollInterval(cfg.Deploy.AgentPollInterval.Duration)
+	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineSvc, cfg.WorkspaceRoot)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)
-	settingSvc := service.NewSettingService(settingRepo, secret.NewBox(cfg.Security.MasterKey))
+	settingSvc := service.NewSettingService(settingRepo, secretBox)
 	if err := settingSvc.Load(context.Background()); err != nil {
 		logger.L().Warn("failed to load settings from db; falling back to yaml config (has migration 0002_setting.sql been applied?)", zap.Error(err))
 	}

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { CreateMachineRequest, ListResponse, Machine, UpdateMachineRequest } from './types'
+import type { CreateMachineRequest, ListResponse, Machine, MachineCreateResult, RotateTokenResult, UpdateMachineRequest } from './types'
 
 export function listMachines() {
   return apiClient.get<ListResponse<Machine>>('/machines').then((r) => r.data)
@@ -10,7 +10,7 @@ export function getMachine(id: number) {
 }
 
 export function createMachine(req: CreateMachineRequest) {
-  return apiClient.post<Machine>('/machines', req).then((r) => r.data)
+  return apiClient.post<MachineCreateResult>('/machines', req).then((r) => r.data)
 }
 
 export function updateMachine(id: number, req: UpdateMachineRequest) {
@@ -23,4 +23,8 @@ export function deleteMachine(id: number) {
 
 export function testMachineConnection(id: number) {
   return apiClient.post<{ ok: boolean; error?: string }>(`/machines/${id}/test`).then((r) => r.data)
+}
+
+export function rotateMachineToken(id: number) {
+  return apiClient.post<RotateTokenResult>(`/machines/${id}/rotate-token`).then((r) => r.data)
 }

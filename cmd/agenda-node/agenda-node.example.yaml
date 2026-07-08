@@ -14,7 +14,9 @@ proxy_listen_addr: "0.0.0.0:7200"
 machine_id: 0
 
 # Shared per-machine secret; must equal this machine's machine.agent_token in the
-# control plane. Generate a random value, e.g. `openssl rand -hex 32`.
+# control plane. The control plane generates and encrypts this for you — copy
+# the value shown once when the machine is added (or its token is rotated) in
+# the agenda-v2 console.
 token: "replace-with-random-secret"
 
 # Control plane base URL, for heartbeats.

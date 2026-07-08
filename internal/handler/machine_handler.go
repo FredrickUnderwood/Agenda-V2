@@ -25,12 +25,32 @@ func (s *Server) createMachine(c *gin.Context) {
 		FailMessage(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	m, err := s.machineSvc.Create(c.Request.Context(), req)
+	m, agentToken, err := s.machineSvc.Create(c.Request.Context(), req)
 	if err != nil {
 		FailWith(c, http.StatusInternalServerError, err)
 		return
 	}
-	Created(c, m)
+	// agent_token (present for agent-mode machines) is only ever returned
+	// here and from rotateMachineToken — it cannot be recovered afterwards.
+	Created(c, gin.H{"machine": m, "agent_token": agentToken})
+}
+
+// rotateMachineToken issues a fresh agent_token for an agent-mode machine,
+// returned once in the response body. The old token stops working
+// immediately — the operator must update that machine's agenda-node.yaml and
+// restart agenda-node.
+func (s *Server) rotateMachineToken(c *gin.Context) {
+	id, ok := paramInt64(c, "machineID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid machine ID")
+		return
+	}
+	token, err := s.machineSvc.RotateAgentToken(c.Request.Context(), id)
+	if err != nil {
+		FailWith(c, http.StatusInternalServerError, err)
+		return
+	}
+	Success(c, gin.H{"agent_token": token})
 }
 
 func (s *Server) getMachine(c *gin.Context) {

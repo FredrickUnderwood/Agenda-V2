@@ -7,7 +7,12 @@ import (
 	"time"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/secret"
 )
+
+// testBox is a disabled Box (no master key): Encrypt/Decrypt pass plaintext
+// through unchanged, matching how these tests store AgentToken directly.
+func testBox() *secret.Box { return secret.NewBox("") }
 
 type fakeMachineRepo struct {
 	m         *domain.Machine
@@ -17,13 +22,22 @@ type fakeMachineRepo struct {
 	updateErr error
 }
 
-func (f *fakeMachineRepo) Create(context.Context, *domain.Machine) error { return nil }
+func (f *fakeMachineRepo) Create(_ context.Context, m *domain.Machine) error {
+	if m.ID == 0 {
+		m.ID = 1
+	}
+	f.m = m
+	return nil
+}
 func (f *fakeMachineRepo) GetByName(context.Context, string) (*domain.Machine, error) {
 	return nil, nil
 }
 func (f *fakeMachineRepo) List(context.Context) ([]*domain.Machine, error) { return nil, nil }
-func (f *fakeMachineRepo) Update(context.Context, *domain.Machine) error   { return nil }
-func (f *fakeMachineRepo) Delete(context.Context, int64) error             { return nil }
+func (f *fakeMachineRepo) Update(_ context.Context, m *domain.Machine) error {
+	f.m = m
+	return nil
+}
+func (f *fakeMachineRepo) Delete(context.Context, int64) error { return nil }
 
 func (f *fakeMachineRepo) GetByID(_ context.Context, id int64) (*domain.Machine, error) {
 	if f.m == nil || f.m.ID != id {
@@ -40,7 +54,7 @@ func (f *fakeMachineRepo) UpdateHeartbeat(_ context.Context, _ int64, version st
 
 func TestHeartbeatRejectsBadToken(t *testing.T) {
 	repo := &fakeMachineRepo{m: &domain.Machine{ID: 3, Mode: domain.MachineModeAgent, AgentToken: "correct"}}
-	svc := NewMachineService(repo)
+	svc := NewMachineService(repo, testBox())
 
 	if err := svc.Heartbeat(context.Background(), 3, "wrong", "0.1.0"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("bad token err = %v, want ErrInvalidCredentials", err)
@@ -53,7 +67,7 @@ func TestHeartbeatRejectsBadToken(t *testing.T) {
 func TestHeartbeatRejectsEmptyStoredToken(t *testing.T) {
 	// A machine with no agent_token must not be heartbeatable by an empty token.
 	repo := &fakeMachineRepo{m: &domain.Machine{ID: 3, Mode: domain.MachineModeAgent, AgentToken: ""}}
-	svc := NewMachineService(repo)
+	svc := NewMachineService(repo, testBox())
 	if err := svc.Heartbeat(context.Background(), 3, "", "0.1.0"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("empty stored token err = %v, want ErrInvalidCredentials", err)
 	}
@@ -61,7 +75,7 @@ func TestHeartbeatRejectsEmptyStoredToken(t *testing.T) {
 
 func TestHeartbeatAcceptsGoodToken(t *testing.T) {
 	repo := &fakeMachineRepo{m: &domain.Machine{ID: 3, Mode: domain.MachineModeAgent, AgentToken: "correct"}}
-	svc := NewMachineService(repo)
+	svc := NewMachineService(repo, testBox())
 	if err := svc.Heartbeat(context.Background(), 3, "correct", "0.2.0"); err != nil {
 		t.Fatalf("good token heartbeat: %v", err)
 	}
@@ -91,6 +105,86 @@ func TestMachineOnlineDerivation(t *testing.T) {
 	}
 	if sshMachine.Online(heartbeatInterval) {
 		t.Error("ssh machine should always report offline (no heartbeat concept)")
+	}
+}
+
+func TestCreateAgentMachineGeneratesAndEncryptsToken(t *testing.T) {
+	repo := &fakeMachineRepo{}
+	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
+
+	_, plaintext, err := svc.Create(context.Background(), CreateMachineRequest{
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(plaintext) != 64 {
+		t.Fatalf("want a 64-char hex token, got %q (len %d)", plaintext, len(plaintext))
+	}
+	if repo.m.AgentToken == plaintext {
+		t.Fatal("agent_token was persisted in plaintext, want it encrypted at rest")
+	}
+	if !secret.IsEncrypted(repo.m.AgentToken) {
+		t.Fatalf("persisted agent_token %q is not enc:v1:-prefixed", repo.m.AgentToken)
+	}
+}
+
+func TestGetDecryptsAgentToken(t *testing.T) {
+	repo := &fakeMachineRepo{}
+	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
+
+	_, plaintext, err := svc.Create(context.Background(), CreateMachineRequest{
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := svc.Get(context.Background(), repo.m.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.AgentToken != plaintext {
+		t.Fatalf("Get returned %q, want decrypted plaintext %q", got.AgentToken, plaintext)
+	}
+}
+
+func TestHeartbeatAcceptsGeneratedTokenAfterEncryption(t *testing.T) {
+	repo := &fakeMachineRepo{}
+	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
+
+	_, plaintext, err := svc.Create(context.Background(), CreateMachineRequest{
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.Heartbeat(context.Background(), repo.m.ID, plaintext, "0.1.0"); err != nil {
+		t.Fatalf("heartbeat with the generated token: %v", err)
+	}
+}
+
+func TestRotateAgentTokenInvalidatesOldToken(t *testing.T) {
+	repo := &fakeMachineRepo{}
+	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
+
+	_, oldToken, err := svc.Create(context.Background(), CreateMachineRequest{
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	newToken, err := svc.RotateAgentToken(context.Background(), repo.m.ID)
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if newToken == oldToken {
+		t.Fatal("rotated token equals the old one")
+	}
+	if err := svc.Heartbeat(context.Background(), repo.m.ID, oldToken, "0.1.0"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("heartbeat with old token err = %v, want ErrInvalidCredentials", err)
+	}
+	if err := svc.Heartbeat(context.Background(), repo.m.ID, newToken, "0.1.0"); err != nil {
+		t.Fatalf("heartbeat with rotated token: %v", err)
 	}
 }
 
