@@ -83,6 +83,65 @@ func TestInit_LogDir_ServiceName_AppendsSuffix(t *testing.T) {
 	}
 }
 
+func TestInit_ReplicaID_AppendsSuffix(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(Config{AppName: "svc", InstanceName: "default", ServiceName: "worker", ReplicaID: "abc123", LogDir: dir}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	Info(context.Background(), "hello")
+	Shutdown()
+
+	if _, err := os.Stat(filepath.Join(dir, "svc__default__worker__abc123.log")); err != nil {
+		t.Fatalf("expected svc__default__worker__abc123.log to exist: %v", err)
+	}
+}
+
+func TestInit_PerReplicaFlag_UsesHostname(t *testing.T) {
+	dir := t.TempDir()
+	host, err := os.Hostname()
+	if err != nil {
+		t.Skipf("os.Hostname unavailable: %v", err)
+	}
+	t.Setenv("AGENDA_LOG_PER_REPLICA", "1")
+	if err := Init(Config{AppName: "svc", InstanceName: "default", LogDir: dir}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	Info(context.Background(), "hello")
+	Shutdown()
+
+	if _, err := os.Stat(filepath.Join(dir, "svc__default__"+host+".log")); err != nil {
+		t.Fatalf("expected svc__default__%s.log to exist: %v", host, err)
+	}
+}
+
+func TestInit_PerReplicaFlag_ExplicitReplicaIDWins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENDA_LOG_PER_REPLICA", "1")
+	if err := Init(Config{AppName: "svc", InstanceName: "default", ReplicaID: "explicit", LogDir: dir}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	Info(context.Background(), "hello")
+	Shutdown()
+
+	if _, err := os.Stat(filepath.Join(dir, "svc__default__explicit.log")); err != nil {
+		t.Fatalf("expected svc__default__explicit.log to exist: %v", err)
+	}
+}
+
+func TestInit_PerReplicaFlag_OffByDefault(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(Config{AppName: "svc", InstanceName: "default", LogDir: dir}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	Info(context.Background(), "hello")
+	Shutdown()
+
+	// No replica segment: the stable single-replica filename is preserved.
+	if _, err := os.Stat(filepath.Join(dir, "svc__default.log")); err != nil {
+		t.Fatalf("expected svc__default.log to exist: %v", err)
+	}
+}
+
 func TestInit_LogDir_NoInstanceName_OmitsSuffix(t *testing.T) {
 	dir := t.TempDir()
 	if err := Init(Config{AppName: "svc", LogDir: dir}); err != nil {

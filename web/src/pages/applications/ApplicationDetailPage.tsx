@@ -8,6 +8,7 @@ import { InstancesTab } from './InstancesTab'
 import { MonitoringTab } from './MonitoringTab'
 import { OverviewTab } from './OverviewTab'
 import { ReleasesTab } from './ReleasesTab'
+import { RoutesTab } from './RoutesTab'
 
 export function ApplicationDetailPage() {
   const { message } = App.useApp()
@@ -69,6 +70,7 @@ export function ApplicationDetailPage() {
         defaultActiveKey="instances"
         items={[
           { key: 'instances', label: 'Instances', children: <InstancesTab appId={id} /> },
+          { key: 'routes', label: 'Routes', children: <RoutesTab appId={id} /> },
           { key: 'releases', label: 'Releases', children: <ReleasesTab appId={id} /> },
           { key: 'monitoring', label: 'Monitoring', children: <MonitoringTab serviceName={app.name} /> },
           { key: 'overview', label: 'Settings', children: <OverviewTab app={app} /> },

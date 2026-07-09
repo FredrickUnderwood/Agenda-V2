@@ -105,7 +105,7 @@ func main() {
 	runner := pipeline.NewRunner(cfg, logSvc, stepSvc)
 
 	// Application
-	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc)
+	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, alertSvc)
 
 	healthMonitor := application.NewHealthMonitor(appHealthSvc, 15*time.Second)
 	healthMonitor.Start()
@@ -114,6 +114,10 @@ func main() {
 	alertRuleMonitor := application.NewAlertRuleMonitor(alertRuleRepo, settingSvc, alertSvc, cfg.Observability.AlertEvalInterval.Duration)
 	alertRuleMonitor.Start()
 	defer alertRuleMonitor.Stop()
+
+	machineMonitor := application.NewMachineMonitor(machineSvc, alertSvc, 30*time.Second)
+	machineMonitor.Start()
+	defer machineMonitor.Stop()
 
 	// Handler
 	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp)

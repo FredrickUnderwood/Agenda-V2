@@ -8,6 +8,7 @@ import * as machinesApi from '@/api/machines'
 import type { ApplicationEnvTarget, ApplicationEnvTargetRequest } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
 import { errorMessage } from '@/utils/errorMessage'
+import { buildTargetsPayload } from './targetPayload'
 
 export function InstancesTab({ appId }: { appId: number }) {
   const { message } = App.useApp()
@@ -24,7 +25,7 @@ export function InstancesTab({ appId }: { appId: number }) {
 
   const createMutation = useMutation({
     mutationFn: (req: ApplicationEnvTargetRequest) =>
-      api.updateApplication(appId, { targets: [...(data?.data.map(toRequest) ?? []), req] }),
+      api.updateApplication(appId, { targets: buildTargetsPayload(data?.data ?? [], [req]) }),
     onSuccess: () => {
       message.success('Instance created.')
       queryClient.invalidateQueries({ queryKey: ['applications', appId] })
@@ -175,19 +176,4 @@ export function InstancesTab({ appId }: { appId: number }) {
       </Modal>
     </div>
   )
-}
-
-function toRequest(t: ApplicationEnvTarget): ApplicationEnvTargetRequest {
-  return {
-    env: t.env,
-    instance_name: t.instance_name,
-    display_name: t.display_name,
-    machine_id: t.machine_id,
-    port: t.port,
-    enabled: t.enabled,
-    health_check_enabled: t.health_check_enabled,
-    health_check_path: t.health_check_path,
-    metrics_enabled: t.metrics_enabled,
-    metrics_port: t.metrics_port,
-  }
 }

@@ -13,9 +13,11 @@ import (
 // into memory.
 const maxTailReadBytes = 2 << 20 // 2MB
 
-// findLogFiles returns every file under dir named "<app>__<instance>.log" or
-// "<app>__<instance>__<service>.log" — the naming scheme sdk/go/log's file
-// sink uses (see AGENDA_INSTANCE_NAME / AGENDA_SERVICE_NAME).
+// findLogFiles returns every file under dir named "<app>__<instance>.log",
+// "<app>__<instance>__<service>.log", or with a further "__<replica>" segment —
+// the naming scheme sdk/go/log's file sink uses (see AGENDA_INSTANCE_NAME /
+// AGENDA_SERVICE_NAME / AGENDA_REPLICA_ID). Replicas of one scaled service each
+// write their own file, so a prefix match (not an exact name) is required.
 func findLogFiles(dir, app, instance string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

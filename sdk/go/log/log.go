@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -30,12 +31,26 @@ import (
 // container of a multi-service compose app (ServiceName — env
 // AGENDA_SERVICE_NAME). Both are platform-injected; most single-service,
 // single-instance apps will only ever see LogDir/AppName populated.
+//
+// ReplicaID disambiguates the log file between replicas of the SAME service
+// (e.g. `docker compose up --scale api=3` or a `deploy.replicas` block).
+// Without it, every replica opens the same <App>__<Instance>__<Service>.log
+// and their independent lumberjack rotations race and corrupt each other. It
+// is deliberately opt-in and unset by default: leaving it empty preserves the
+// single-replica filename exactly, so redeploys keep writing to one stable
+// file rather than churning a new one each time.
+//
+// Scaled services enable it one of two ways (see Init): set ReplicaID / the
+// AGENDA_REPLICA_ID env to an explicit per-container-unique value, or just set
+// the boolean AGENDA_LOG_PER_REPLICA=1 and let the SDK fall back to the
+// container hostname automatically (no ${HOSTNAME} interpolation to get wrong).
 type Config struct {
 	AppName      string
 	Level        string
 	LogDir       string
 	InstanceName string
 	ServiceName  string
+	ReplicaID    string
 }
 
 // firstNonEmpty returns the first non-empty value, letting an explicit Config
@@ -47,6 +62,16 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// isTruthy reports whether an env var value asks for an opt-in flag to be on.
+func isTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 var (
@@ -66,6 +91,16 @@ func Init(cfg Config) error {
 	logDir := firstNonEmpty(cfg.LogDir, os.Getenv("AGENDA_LOG_DIR"))
 	instanceName := firstNonEmpty(cfg.InstanceName, os.Getenv("AGENDA_INSTANCE_NAME"))
 	serviceName := firstNonEmpty(cfg.ServiceName, os.Getenv("AGENDA_SERVICE_NAME"))
+	replicaID := firstNonEmpty(cfg.ReplicaID, os.Getenv("AGENDA_REPLICA_ID"))
+	// When no explicit replica id is given but per-replica logging is opted
+	// into, derive one from the container hostname (unique per replica under
+	// docker compose). Kept off by default so single-replica apps keep one
+	// stable log filename across redeploys instead of churning a new one.
+	if replicaID == "" && isTruthy(os.Getenv("AGENDA_LOG_PER_REPLICA")) {
+		if h, err := os.Hostname(); err == nil {
+			replicaID = h
+		}
+	}
 
 	zcfg := zap.NewProductionConfig()
 	if cfg.Level != "" {
@@ -88,6 +123,9 @@ func Init(cfg Config) error {
 		}
 		if serviceName != "" {
 			fileName += "__" + serviceName
+		}
+		if replicaID != "" {
+			fileName += "__" + replicaID
 		}
 		fileSink := zapcore.AddSync(&lumberjack.Logger{
 			Filename:   filepath.Join(logDir, fileName+".log"),

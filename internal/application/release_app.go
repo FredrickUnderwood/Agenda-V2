@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,6 +15,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/pipeline"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
+	alertsdk "github.com/FredrickUnderwood/agenda-v2/sdk/go/alert"
 )
 
 // ReleaseApplication is the sole deploy-trigger orchestrator in this build:
@@ -31,6 +34,10 @@ type ReleaseApplication struct {
 	appSvc     *service.ApplicationService
 	releaseSvc *service.ApplicationReleaseService
 	lockSvc    *service.DeployLockService
+	// alerts fires an ops notification (and inbox record) when a deploy run
+	// ends in failure. Optional/nil-safe: a build without alerting configured
+	// still deploys; it just doesn't emit the failure notice.
+	alerts *service.AlertService
 }
 
 func NewReleaseApplication(
@@ -42,11 +49,12 @@ func NewReleaseApplication(
 	appSvc *service.ApplicationService,
 	releaseSvc *service.ApplicationReleaseService,
 	lockSvc *service.DeployLockService,
+	alerts *service.AlertService,
 ) *ReleaseApplication {
 	return &ReleaseApplication{
 		cfg: cfg, builder: builder, runner: runner,
 		logSvc: logSvc, stepSvc: stepSvc, appSvc: appSvc,
-		releaseSvc: releaseSvc, lockSvc: lockSvc,
+		releaseSvc: releaseSvc, lockSvc: lockSvc, alerts: alerts,
 	}
 }
 
@@ -314,7 +322,7 @@ func (a *ReleaseApplication) runAsync(releaseID int64, target *domain.DeployTarg
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	a.runner.Run(ctx, log, target, blueprints, localPath)
-	a.syncReleaseStatus(context.WithoutCancel(ctx), releaseID, log)
+	a.syncReleaseStatus(context.WithoutCancel(ctx), releaseID, target, log)
 }
 
 // syncReleaseStatus folds the just-finished pipeline run's terminal status
@@ -327,7 +335,7 @@ func (a *ReleaseApplication) runAsync(releaseID int64, target *domain.DeployTarg
 // either: every call below (ApplicationReleaseService -> ApplicationReleaseRepository.UpdateStatus)
 // already logs the underlying failure at the repository layer, and logging
 // it again here would just duplicate that entry.
-func (a *ReleaseApplication) syncReleaseStatus(ctx context.Context, releaseID int64, log *domain.DeployLog) {
+func (a *ReleaseApplication) syncReleaseStatus(ctx context.Context, releaseID int64, target *domain.DeployTarget, log *domain.DeployLog) {
 	switch log.Status {
 	case domain.DeployStatusSuccess:
 		if err := a.releaseSvc.MarkDeploySucceeded(ctx, releaseID, log.TriggerSHA); err != nil {
@@ -342,9 +350,48 @@ func (a *ReleaseApplication) syncReleaseStatus(ctx context.Context, releaseID in
 		}
 	case domain.DeployStatusFailed:
 		_ = a.releaseSvc.MarkDeployFailed(ctx, releaseID)
+		a.alertDeployFailed(ctx, target, log)
 	default:
 		// paused or (unexpectedly) still running — nothing to sync yet.
 	}
+}
+
+// alertDeployFailed emits an ops notification (chat channels + in-app inbox)
+// for a failed deploy run. Nil-safe and best-effort: it must never affect the
+// deploy outcome, and it bounds its own send so a dead webhook can't wedge the
+// tail of the run goroutine.
+func (a *ReleaseApplication) alertDeployFailed(ctx context.Context, target *domain.DeployTarget, log *domain.DeployLog) {
+	if a.alerts == nil || target == nil {
+		return
+	}
+	appName, env, instance := "unknown", "", ""
+	if target.App != nil {
+		appName = target.App.Name
+	}
+	env = string(target.Env())
+	if target.EnvTarget != nil {
+		instance = target.EnvTarget.InstanceName
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Deploy failed for %s (%s/%s).\n", appName, env, instance)
+	if target.Branch != "" {
+		fmt.Fprintf(&b, "Branch: %s\n", target.Branch)
+	}
+	if log != nil {
+		if log.TriggerSHA != "" {
+			fmt.Fprintf(&b, "Commit: %s\n", log.TriggerSHA)
+		}
+		fmt.Fprintf(&b, "Deploy log: #%d", log.ID)
+	}
+
+	sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	a.alerts.SendToAll(sendCtx, alertsdk.Message{
+		Title:   fmt.Sprintf("Deploy failed: %s (%s)", appName, env),
+		Content: b.String(),
+		Level:   alertsdk.LevelWarning,
+	})
 }
 
 func (a *ReleaseApplication) lockTTL() time.Duration {
