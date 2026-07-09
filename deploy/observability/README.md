@@ -40,3 +40,37 @@ your own ingress) the same way you would any other internal service.
 `status_class` is `2xx`/`3xx`/`4xx`/`5xx` (not the raw status code, to keep
 cardinality bounded). `backend` is the target's instance name (e.g.
 `default`, `canary`), not the raw backend URL.
+
+## Custom app metrics
+
+Deployed apps can define their own metrics (counters, gauges, histograms) via
+`sdk/go/metric` and have them scraped alongside the gateway's own metrics —
+useful for business-level "打点" like `orders_failed_total`, which alert rules
+(see below) can then fire on.
+
+The control plane, not Prometheus, is what reaches each app instance: it
+relays every scrape through that instance's agenda-node over the same
+authenticated channel used for log reading, so Prometheus never needs direct
+network access to app ports on every deploy machine. Only agent-mode machines
+support this (same requirement application log reading already has).
+
+Setup:
+1. In the app's code: `metric.Init(metric.Config{})` once at startup, then
+   define metrics with `metric.NewCounterVec`/`NewGaugeVec`/`NewHistogramVec`
+   — see `sdk/go/metric`.
+2. In the app's own `docker-compose.yml`, publish the metrics port:
+   `ports: ["${APP_METRICS_PORT:-9464}:9464"]` (mirrors the existing
+   `${APP_PORT}` convention).
+3. In the agenda-v2 console, enable "Metrics" on the target's Instance
+   config and set its host port (this becomes `APP_METRICS_PORT`).
+4. Configure two agenda-v2 Settings (Settings page, or
+   `PUT /api/v1/settings/:key`): `observability.prometheus_url` (this
+   Prometheus's own base URL, e.g. `http://<host>:9090`) and
+   `observability.scrape_token` (any random secret — the bearer token
+   Prometheus presents back to the control plane; mark it `is_secret`).
+5. Add the `agenda-app-metrics` job from `prometheus.yml` to your Prometheus
+   config (already included in this add-on's `prometheus.yml`), pointing
+   `http_sd_configs`/`__address__` at wherever the control plane actually
+   listens.
+6. Check Prometheus's **Status → Targets** — enabled instances should appear
+   under the `agenda-app-metrics` job as `UP`.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
@@ -17,6 +18,17 @@ func composeEnv(port int) []string {
 		return nil
 	}
 	return []string{fmt.Sprintf("APP_PORT=%d", port)}
+}
+
+// composeMetricsEnv mirrors composeEnv for the metrics port: metricsPort > 0
+// surfaces as APP_METRICS_PORT so a user compose file can publish
+// ${APP_METRICS_PORT:-9464} the same way it already publishes ${APP_PORT}.
+// Only relevant to ComposeUpStep — ComposePullStep has nothing to publish.
+func composeMetricsEnv(metricsPort int) []string {
+	if metricsPort <= 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("APP_METRICS_PORT=%d", metricsPort)}
 }
 
 // ComposePullStep runs `docker compose -p <project> -f <file> pull`.
@@ -50,6 +62,7 @@ type ComposeUpStep struct {
 	ComposeFile string
 	ProjectName string
 	Port        int
+	MetricsPort int
 	Services    []string
 
 	AppName      string
@@ -62,10 +75,14 @@ type ComposeUpStep struct {
 }
 
 func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
+	metricsAddr := ""
+	if s.MetricsPort > 0 {
+		metricsAddr = contract.AgendaContainerMetricsAddr
+	}
 	overridePath, err := writeAgendaOverride(
 		ctx, s.Machine,
 		rc.LocalPath, s.ComposeFile, s.WorkDir,
-		s.AppName, s.Branch, s.InstanceName,
+		s.AppName, s.Branch, s.InstanceName, metricsAddr,
 		s.Services,
 		s.Env,
 	)
@@ -87,5 +104,6 @@ func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
 		"up", "-d", "--build", "--remove-orphans",
 	}
 	args = append(args, s.Services...)
-	return r.RunCmdEnv(ctx, cwd, composeEnv(s.Port), "docker", args, rc.Output)
+	env := append(composeEnv(s.Port), composeMetricsEnv(s.MetricsPort)...)
+	return r.RunCmdEnv(ctx, cwd, env, "docker", args, rc.Output)
 }

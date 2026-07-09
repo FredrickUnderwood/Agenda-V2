@@ -7,6 +7,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { MePage } from '@/pages/MePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { UsersPage } from '@/pages/admin/UsersPage'
+import { AlertRulesPage } from '@/pages/alerts/AlertRulesPage'
 import { ApplicationDetailPage } from '@/pages/applications/ApplicationDetailPage'
 import { ApplicationsListPage } from '@/pages/applications/ApplicationsListPage'
 import { InstanceLogsPage } from '@/pages/applications/InstanceLogsPage'
@@ -28,6 +29,7 @@ function App() {
                 <Route path="applications/:appId" element={<ApplicationDetailPage />} />
                 <Route path="applications/:appId/instances/:targetId/logs" element={<InstanceLogsPage />} />
                 <Route path="machines" element={<MachinesListPage />} />
+                <Route path="alert-rules" element={<AlertRulesPage />} />
                 <Route path="inbox" element={<InboxPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="admin/users" element={<UsersPage />} />

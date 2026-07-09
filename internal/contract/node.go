@@ -54,6 +54,24 @@ type NodeHeartbeatRequest struct {
 // path — defined once here so the two ends can't drift.
 const AgendaContainerLogDir = "/var/log/agenda"
 
+// AgendaContainerMetricsAddr is the fixed in-container listen address
+// sdk/go/metric's AGENDA_METRICS_ADDR points at when a target has
+// MetricsEnabled. The operator-chosen HOST port is separate
+// (ApplicationEnvTarget.MetricsPort / the APP_METRICS_PORT env var passed to
+// `docker compose up`, mirroring how APP_PORT already works) — this constant
+// only fixes what the process inside the container binds to.
+const AgendaContainerMetricsAddr = ":9464"
+
+// Query params for GET /v1/metrics/:app/:instance.
+const (
+	NodeMetricsQueryPort = "port"
+	NodeMetricsQueryPath = "path"
+)
+
+// DefaultMetricsPath is the HTTP path agenda-node fetches from
+// 127.0.0.1:<port> when the "path" query param is omitted.
+const DefaultMetricsPath = "/metrics"
+
 // NodeLogFile is one matched on-disk log file in the response of
 // GET /v1/logs/:app/:instance. Service is the AGENDA_SERVICE_NAME segment of
 // the filename (empty for single-service apps that never set it).

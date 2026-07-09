@@ -30,6 +30,15 @@ type ApplicationEnvTarget struct {
 	HealthCheckIntervalSec      int         `json:"health_check_interval_sec"            gorm:"not null;default:30"`
 	HealthCheckFailureThreshold int         `json:"health_check_failure_threshold"       gorm:"not null;default:3"`
 	HealthCheckSuccessThreshold int         `json:"health_check_success_threshold"       gorm:"not null;default:1"`
+	// MetricsEnabled/MetricsPort opt this target into custom app metrics: when
+	// enabled, the deploy pipeline injects AGENDA_METRICS_ADDR into every
+	// service's container (sdk/go/metric listens there) and passes
+	// APP_METRICS_PORT to `docker compose up` for the operator's own compose
+	// file to publish, exactly mirroring how Port/APP_PORT already works.
+	// Requires an agent-mode machine — Prometheus reaches this port only via
+	// agenda-node's authenticated relay, same requirement application logs have.
+	MetricsEnabled bool `json:"metrics_enabled" gorm:"not null;default:false"`
+	MetricsPort    int  `json:"metrics_port"    gorm:"not null;default:0"`
 	// EnvOverrideJSON is the instance-level env var override layer (highest
 	// priority), merged on top of ApplicationEnvironment.EnvVars (env level)
 	// and DockerDeployConfig.Env (application level).

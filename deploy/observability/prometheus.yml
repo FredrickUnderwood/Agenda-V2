@@ -8,3 +8,40 @@ scrape_configs:
       # Edit this if your gateway isn't reachable at host.docker.internal:8080
       # (e.g. it's on another machine, or GATEWAY_ADDR is non-default).
       - targets: ["host.docker.internal:8080"]
+
+  # Custom app metrics (sdk/go/metric). The control plane is the single
+  # scrape entrypoint — it relays each target's /metrics through that
+  # target's agenda-node, so Prometheus never needs direct network
+  # reachability to app ports on every machine. Requires
+  # observability.prometheus_url + observability.scrape_token to be set as
+  # agenda-v2 Settings first (Settings page or PUT /api/v1/settings/:key).
+  - job_name: agenda-app-metrics
+    scrape_timeout: 8s
+    metrics_path: /api/v1/observability/app-metrics
+    authorization:
+      credentials: "<observability.scrape_token setting value>"
+    http_sd_configs:
+      # Edit this if your control plane isn't reachable at
+      # host.docker.internal:8081 (e.g. it's on another machine, or
+      # server.addr is non-default). This must match the control-plane
+      # host:port used below in the __address__ replacement.
+      - url: http://host.docker.internal:8081/api/v1/observability/scrape-targets
+        refresh_interval: 30s
+        authorization:
+          credentials: "<observability.scrape_token setting value>"
+    relabel_configs:
+      # __address__ starts out as the discovered target's id (see
+      # listScrapeTargets); move it into the "target" query param
+      # scrapeAppMetrics reads, then point __address__ at the control plane
+      # itself — the standard "multi-target exporter" pattern (as used by
+      # blackbox_exporter/snmp_exporter).
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__meta_agenda_app]
+        target_label: app
+      - source_labels: [__meta_agenda_env]
+        target_label: env
+      - source_labels: [__meta_agenda_instance]
+        target_label: instance
+      - target_label: __address__
+        replacement: host.docker.internal:8081

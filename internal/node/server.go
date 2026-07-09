@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -58,6 +59,7 @@ func (s *Server) registerRoutes() {
 		v1.DELETE("/jobs/:job_id", s.deleteJob)
 		v1.PUT("/proxy/:instance", s.registerProxy)
 		v1.GET("/logs/:app/:instance", s.getLogs)
+		v1.GET("/metrics/:app/:instance", s.getMetrics)
 	}
 }
 
@@ -207,4 +209,33 @@ func (s *Server) getLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, contract.NodeLogsResponse{App: app, Instance: instance, Logs: logs})
+}
+
+// getMetrics relays app/instance's own /metrics response (sdk/go/metric,
+// listening on the given local port) back to the caller verbatim. app/
+// instance aren't used for routing (port is self-sufficient, unlike getLogs'
+// filename-glob lookup) — kept for parity with the logs route and so the
+// call is legible in access logs.
+func (s *Server) getMetrics(c *gin.Context) {
+	portStr := c.Query(contract.NodeMetricsQueryPort)
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "port must be a valid TCP port"})
+		return
+	}
+	path := c.Query(contract.NodeMetricsQueryPath)
+	if path == "" {
+		path = contract.DefaultMetricsPath
+	}
+	if !strings.HasPrefix(path, "/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path must start with /"})
+		return
+	}
+
+	body, contentType, err := fetchLocalMetrics(c.Request.Context(), port, path)
+	if err != nil {
+		c.String(http.StatusBadGateway, "%s", err.Error())
+		return
+	}
+	c.Data(http.StatusOK, contentType, body)
 }

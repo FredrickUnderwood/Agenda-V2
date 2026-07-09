@@ -74,6 +74,8 @@ type ApplicationEnvTargetRequest struct {
 	HealthCheckIntervalSec      int                               `json:"health_check_interval_sec"`
 	HealthCheckFailureThreshold int                               `json:"health_check_failure_threshold"`
 	HealthCheckSuccessThreshold int                               `json:"health_check_success_threshold"`
+	MetricsEnabled              bool                              `json:"metrics_enabled"`
+	MetricsPort                 int                               `json:"metrics_port"`
 	EnvOverride                 map[string]string                 `json:"env_override,omitempty"`
 	GatewayRoutes               *[]ApplicationGatewayRouteRequest `json:"gateway_routes,omitempty"`
 }
@@ -301,6 +303,8 @@ func (s *ApplicationService) syncTargets(ctx context.Context, appID int64, reqs 
 			HealthCheckIntervalSec:      req.HealthCheckIntervalSec,
 			HealthCheckFailureThreshold: req.HealthCheckFailureThreshold,
 			HealthCheckSuccessThreshold: req.HealthCheckSuccessThreshold,
+			MetricsEnabled:              req.MetricsEnabled,
+			MetricsPort:                 req.MetricsPort,
 			EnvOverrideJSON:             envOverrideJSON,
 		}
 		normalizeHealthCheckConfig(target)

@@ -73,6 +73,72 @@ func TestFetchLogs_EmptyBaseURL(t *testing.T) {
 	}
 }
 
+func TestFetchMetrics_BuildsRequestAndReturnsRawBody(t *testing.T) {
+	var gotPath, gotQuery, gotToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotToken = r.Header.Get(contract.HeaderNodeToken)
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		w.Write([]byte("my_counter 42\n"))
+	}))
+	defer srv.Close()
+
+	body, contentType, err := FetchMetrics(context.Background(), srv.URL, "secret-token", "myapp", "default", 9464, "")
+	if err != nil {
+		t.Fatalf("FetchMetrics: %v", err)
+	}
+	if gotPath != "/v1/metrics/myapp/default" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotToken != "secret-token" {
+		t.Errorf("token header = %q", gotToken)
+	}
+	if !containsAll(gotQuery, "port=9464") || strings.Contains(gotQuery, "path=") {
+		t.Errorf("query = %q", gotQuery)
+	}
+	if string(body) != "my_counter 42\n" {
+		t.Errorf("body = %q", body)
+	}
+	if !strings.Contains(contentType, "text/plain") {
+		t.Errorf("content-type = %q", contentType)
+	}
+}
+
+func TestFetchMetrics_CustomPath(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	if _, _, err := FetchMetrics(context.Background(), srv.URL, "tok", "myapp", "default", 9464, "/custom"); err != nil {
+		t.Fatalf("FetchMetrics: %v", err)
+	}
+	if !containsAll(gotQuery, "port=9464", "path=%2Fcustom") {
+		t.Errorf("query = %q", gotQuery)
+	}
+}
+
+func TestFetchMetrics_ErrorStatusReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("app unreachable"))
+	}))
+	defer srv.Close()
+
+	if _, _, err := FetchMetrics(context.Background(), srv.URL, "tok", "myapp", "default", 9464, ""); err == nil {
+		t.Fatal("expected error for 502 response")
+	}
+}
+
+func TestFetchMetrics_EmptyBaseURL(t *testing.T) {
+	if _, _, err := FetchMetrics(context.Background(), "", "tok", "myapp", "default", 9464, ""); err == nil {
+		t.Fatal("expected error for empty agentBaseURL")
+	}
+}
+
 func containsAll(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if !strings.Contains(s, sub) {

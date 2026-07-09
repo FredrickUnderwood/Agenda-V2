@@ -3,6 +3,7 @@ import type { MenuProps } from 'antd'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   AppstoreOutlined,
+  BellOutlined,
   ClusterOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -18,6 +19,7 @@ const { Sider, Header, Content } = Layout
 const NAV_ITEMS: MenuProps['items'] = [
   { key: '/applications', icon: <AppstoreOutlined />, label: 'Applications' },
   { key: '/machines', icon: <ClusterOutlined />, label: 'Machines' },
+  { key: '/alert-rules', icon: <BellOutlined />, label: 'Alert Rules' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
   { key: '/admin/users', icon: <TeamOutlined />, label: 'Users' },
 ]

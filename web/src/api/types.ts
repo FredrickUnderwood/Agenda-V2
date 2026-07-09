@@ -85,6 +85,8 @@ export interface ApplicationEnvTarget {
   health_check_interval_sec: number
   health_check_failure_threshold: number
   health_check_success_threshold: number
+  metrics_enabled: boolean
+  metrics_port: number
   gateway_routes?: ApplicationGatewayRoute[]
   health?: ApplicationInstanceHealth | null
 }
@@ -130,6 +132,8 @@ export interface ApplicationEnvTargetRequest {
   enabled?: boolean
   health_check_enabled?: boolean
   health_check_path?: string
+  metrics_enabled?: boolean
+  metrics_port?: number
   gateway_routes?: ApplicationGatewayRouteRequest[]
 }
 
@@ -292,4 +296,46 @@ export interface Notification {
   is_read: boolean
   created_at: string
   updated_at: string
+}
+
+export type AlertLevel = 'info' | 'warning' | 'critical'
+export type AlertRuleState = 'ok' | 'firing'
+
+// Never carries webhook_url/secret — see internal/handler.listAlertChannels.
+export interface AlertChannel {
+  name: string
+  type: string
+  enabled: boolean
+}
+
+export interface AlertRule {
+  id: number
+  name: string
+  expr: string
+  for_seconds: number
+  level: AlertLevel
+  channels: string[]
+  enabled: boolean
+  state: AlertRuleState
+  consecutive_breaches: number
+  last_evaluated_at?: string | null
+  last_fired_at?: string | null
+  last_error: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UpsertAlertRuleRequest {
+  name: string
+  expr: string
+  for_seconds: number
+  level: AlertLevel
+  channels: string[]
+  enabled?: boolean
+}
+
+export interface AlertRuleTestResult {
+  firing: boolean
+  result?: unknown
+  error?: string
 }

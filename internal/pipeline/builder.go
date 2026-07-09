@@ -79,8 +79,12 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 	}
 	projectName := util.Slug(target.App.Name) + "-" + util.Slug(target.Branch) + "-" + util.Slug(string(target.Env())) + "-" + util.Slug(targetInstanceName(target))
 	port := 0
+	metricsPort := 0
 	if target.EnvTarget != nil {
 		port = target.EnvTarget.Port
+		if target.EnvTarget.MetricsEnabled {
+			metricsPort = target.EnvTarget.MetricsPort
+		}
 	}
 
 	mergedEnv, err := b.mergeEnv(ctx, target, dockerCfg)
@@ -107,7 +111,7 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 		Name: "compose_up", Type: domain.StepTypeComposeUp,
 		Exec: &ComposeUpStep{
 			Machine: machine, WorkDir: dockerCfg.WorkDir, ComposeFile: composeFile,
-			ProjectName: projectName, Port: port, Services: dockerCfg.Services,
+			ProjectName: projectName, Port: port, MetricsPort: metricsPort, Services: dockerCfg.Services,
 			AppName: target.App.Name, Branch: target.Branch, InstanceName: targetInstanceName(target),
 			Env: mergedEnv,
 		},

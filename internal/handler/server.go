@@ -25,8 +25,10 @@ type Server struct {
 	machineSvc      *service.MachineService
 	logSvc          *service.DeployLogService
 	appLogSvc       *service.ApplicationLogService
+	appMetricsSvc   *service.ApplicationMetricsService
 	settingSvc      *service.SettingService
 	alertSvc        *service.AlertService
+	alertRuleSvc    *service.AlertRuleService
 	notificationSvc *service.NotificationService
 	userSvc         *service.UserService
 	auth            *auth.Manager
@@ -43,8 +45,10 @@ func NewServer(
 	machineSvc *service.MachineService,
 	logSvc *service.DeployLogService,
 	appLogSvc *service.ApplicationLogService,
+	appMetricsSvc *service.ApplicationMetricsService,
 	settingSvc *service.SettingService,
 	alertSvc *service.AlertService,
+	alertRuleSvc *service.AlertRuleService,
 	notificationSvc *service.NotificationService,
 	userSvc *service.UserService,
 	authMgr *auth.Manager,
@@ -54,8 +58,8 @@ func NewServer(
 	s := &Server{
 		cfg: cfg, engine: gin.New(),
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc,
-		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, settingSvc: settingSvc,
-		alertSvc: alertSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
+		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, appMetricsSvc: appMetricsSvc, settingSvc: settingSvc,
+		alertSvc: alertSvc, alertRuleSvc: alertRuleSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
 	s.engine.Use(ginzap.RecoveryWithZap(logger.L(), true))
@@ -80,6 +84,15 @@ func (s *Server) registerRoutes() {
 	// Node heartbeat authenticates with the per-machine node token (checked in
 	// the handler), not the admin bearer, so it lives before the auth middleware.
 	v1.POST("/machines/:machineID/heartbeat", s.machineHeartbeat)
+
+	// Prometheus is the caller here, not a user session — gated by its own
+	// static scrape-token middleware instead of the user auth middleware below.
+	obs := v1.Group("/observability")
+	obs.Use(s.requireScrapeToken())
+	{
+		obs.GET("/scrape-targets", s.listScrapeTargets)
+		obs.GET("/app-metrics", s.scrapeAppMetrics)
+	}
 
 	// Everything registered after this requires authentication when auth is
 	// configured; with neither jwt_secret nor auth_token set the API stays open
@@ -160,6 +173,20 @@ func (s *Server) registerRoutes() {
 	{
 		alerts.POST("", s.sendAlert)
 		alerts.POST("/test", s.testAlert)
+		alerts.GET("/channels", s.listAlertChannels)
+	}
+
+	// Alert rules evaluate PromQL against Prometheus and can trigger external
+	// sends via the channels above — admin only, same reasoning as /alerts.
+	alertRules := v1.Group("/alert-rules")
+	alertRules.Use(s.requireAdmin())
+	{
+		alertRules.GET("", s.listAlertRules)
+		alertRules.POST("", s.createAlertRule)
+		alertRules.GET("/:id", s.getAlertRule)
+		alertRules.PUT("/:id", s.updateAlertRule)
+		alertRules.DELETE("/:id", s.deleteAlertRule)
+		alertRules.POST("/:id/test", s.testAlertRule)
 	}
 
 	// User management — admin only.

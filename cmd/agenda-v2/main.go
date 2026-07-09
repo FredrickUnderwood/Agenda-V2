@@ -67,6 +67,7 @@ func main() {
 	settingRepo := repository.NewSettingRepository(db)
 	userRepo := repository.NewUserRepository(db)
 	notificationRepo := repository.NewNotificationRepository(db)
+	alertRuleRepo := repository.NewAlertRuleRepository(db)
 
 	// Service
 	secretBox := secret.NewBox(cfg.Security.MasterKey)
@@ -78,6 +79,7 @@ func main() {
 	machineSvc := service.NewMachineService(machineRepo, secretBox)
 	machineSvc.SetAgentPollInterval(cfg.Deploy.AgentPollInterval.Duration)
 	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineSvc, cfg.WorkspaceRoot)
+	appMetricsSvc := service.NewApplicationMetricsService(appRepo, appTargetRepo, machineSvc)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)
@@ -90,6 +92,7 @@ func main() {
 	cfg.Git.TokenResolver = settingSvc.GitToken
 	cfg.Git.SecretValues = settingSvc.SecretValues
 	alertSvc := service.NewAlertService(settingSvc, notificationRepo)
+	alertRuleSvc := service.NewAlertRuleService(alertRuleRepo, settingSvc, alertSvc)
 	notificationSvc := service.NewNotificationService(notificationRepo)
 	userSvc := service.NewUserService(userRepo)
 	authMgr := auth.NewManager(cfg.Auth.JWTSecret, cfg.Server.AuthToken, cfg.Auth.TokenTTL.Duration)
@@ -108,8 +111,12 @@ func main() {
 	healthMonitor.Start()
 	defer healthMonitor.Stop()
 
+	alertRuleMonitor := application.NewAlertRuleMonitor(alertRuleRepo, settingSvc, alertSvc, cfg.Observability.AlertEvalInterval.Duration)
+	alertRuleMonitor.Start()
+	defer alertRuleMonitor.Stop()
+
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, appLogSvc, settingSvc, alertSvc, notificationSvc, userSvc, authMgr, releaseApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

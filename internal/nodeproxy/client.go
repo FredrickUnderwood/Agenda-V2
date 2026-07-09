@@ -102,3 +102,46 @@ func FetchLogs(ctx context.Context, agentBaseURL, agentToken, app, instance, dir
 	}
 	return &out, nil
 }
+
+// FetchMetrics asks the node at agentBaseURL for app/instance's current
+// Prometheus exposition-format text, scraped from its local metricsPort.
+// path == "" leaves the node's own default (contract.DefaultMetricsPath).
+// Returns the raw body and the node's own Content-Type verbatim — unlike
+// FetchLogs, there is no JSON envelope to unmarshal: the body must reach
+// Prometheus byte-for-byte.
+func FetchMetrics(ctx context.Context, agentBaseURL, agentToken, app, instance string, metricsPort int, path string) (body []byte, contentType string, err error) {
+	base := strings.TrimRight(agentBaseURL, "/")
+	if base == "" {
+		return nil, "", errors.New("agent_base_url is empty; cannot fetch metrics")
+	}
+	u, err := url.Parse(base + "/v1/metrics/" + url.PathEscape(app) + "/" + url.PathEscape(instance))
+	if err != nil {
+		return nil, "", err
+	}
+	q := u.Query()
+	q.Set(contract.NodeMetricsQueryPort, strconv.Itoa(metricsPort))
+	if path != "" {
+		q.Set(contract.NodeMetricsQueryPath, path)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set(contract.HeaderNodeToken, agentToken)
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", errors.New("fetch metrics failed: " + resp.Status + ": " + strings.TrimSpace(string(respBody)))
+	}
+	return respBody, resp.Header.Get("Content-Type"), nil
+}

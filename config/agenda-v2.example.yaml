@@ -60,6 +60,15 @@ auth:
   bootstrap_admin_username: ""
   bootstrap_admin_password: ""
 
+observability:
+  # How often the alert rule engine evaluates every enabled AlertRule's PromQL
+  # against Prometheus. Each tick is N rules x one Prometheus query, so this is
+  # separately tunable from other tickers. Prometheus's own base URL and the
+  # scrape token Prometheus presents back are NOT here — they're operator-
+  # rotatable, so they live in the Setting table (observability.prometheus_url /
+  # observability.scrape_token) instead — see deploy/observability/README.md.
+  alert_eval_interval: "30s"
+
 workspace_root: "~/.agenda-v2/workspaces"
 
 # Machines are usually managed in the DB (via the API), but may also be declared

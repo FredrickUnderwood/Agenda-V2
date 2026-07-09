@@ -19,6 +19,7 @@ type Config struct {
 	Log           LogConfig                `yaml:"log"`
 	Security      SecurityConfig           `yaml:"security"`
 	Auth          AuthConfig               `yaml:"auth"`
+	Observability ObservabilityConfig      `yaml:"observability"`
 	Machines      map[string]MachineConfig `yaml:"machines"`
 	WorkspaceRoot string                   `yaml:"workspace_root"`
 }
@@ -147,6 +148,18 @@ type LogConfig struct {
 	Level string `yaml:"level"`
 }
 
+// ObservabilityConfig tunes the alert rule engine. The Prometheus base URL
+// and scrape token themselves live in the Setting table, not here (see
+// deploy/observability/README.md) — they're operator-rotatable, this is a
+// process-tuning knob closer to Deploy.AgentPollInterval.
+type ObservabilityConfig struct {
+	// AlertEvalInterval is how often AlertRuleMonitor evaluates every enabled
+	// rule against Prometheus. Each tick is N rules x one Prometheus HTTP
+	// query, so — unlike HealthMonitor's hardcoded 15s — this is worth being
+	// tunable without a rebuild.
+	AlertEvalInterval duration `yaml:"alert_eval_interval"`
+}
+
 // duration is a yaml-unmarshallable wrapper around time.Duration.
 type duration struct{ time.Duration }
 
@@ -184,6 +197,7 @@ func defaults() *Config {
 		},
 		Log:           LogConfig{Level: "info"},
 		Auth:          AuthConfig{TokenTTL: duration{24 * time.Hour}},
+		Observability: ObservabilityConfig{AlertEvalInterval: duration{30 * time.Second}},
 		WorkspaceRoot: "~/.agenda-v2/workspaces",
 	}
 }

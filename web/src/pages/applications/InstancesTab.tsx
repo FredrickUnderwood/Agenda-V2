@@ -20,6 +20,7 @@ export function InstancesTab({ appId }: { appId: number }) {
     queryFn: () => api.listApplicationInstances(appId),
   })
   const { data: machines } = useQuery({ queryKey: ['machines'], queryFn: machinesApi.listMachines })
+  const metricsEnabled = Form.useWatch('metrics_enabled', form)
 
   const createMutation = useMutation({
     mutationFn: (req: ApplicationEnvTargetRequest) =>
@@ -78,6 +79,16 @@ export function InstancesTab({ appId }: { appId: number }) {
             render: (_, record) => <Link to={`/applications/${appId}/instances/${record.id}/logs`}>View logs</Link>,
           },
           {
+            title: 'Metrics',
+            key: 'metrics',
+            render: (_, record) =>
+              record.metrics_enabled ? (
+                <StatusPill status="verified" label={`:${record.metrics_port}`} />
+              ) : (
+                <StatusPill status="idle" label="disabled" />
+              ),
+          },
+          {
             title: '',
             key: 'actions',
             render: (_, record) => (
@@ -107,7 +118,15 @@ export function InstancesTab({ appId }: { appId: number }) {
           form={form}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ env: 'prod', instance_name: 'default', enabled: true, health_check_enabled: false, health_check_path: '/healthz' }}
+          initialValues={{
+            env: 'prod',
+            instance_name: 'default',
+            enabled: true,
+            health_check_enabled: false,
+            health_check_path: '/healthz',
+            metrics_enabled: false,
+            metrics_port: 9464,
+          }}
           onFinish={(v) => createMutation.mutate(v)}
         >
           <Form.Item name="env" label="Environment" rules={[{ required: true }]}>
@@ -134,6 +153,24 @@ export function InstancesTab({ appId }: { appId: number }) {
           <Form.Item name="health_check_path" label="Health check path">
             <Input placeholder="/healthz" />
           </Form.Item>
+          <Form.Item
+            name="metrics_enabled"
+            label="Custom metrics"
+            valuePropName="checked"
+            extra="Requires an agent-mode machine — Prometheus reaches this instance only through agenda-node's authenticated relay, same as log reading."
+          >
+            <Switch />
+          </Form.Item>
+          {metricsEnabled && (
+            <Form.Item
+              name="metrics_port"
+              label="Metrics port"
+              rules={[{ required: true }]}
+              extra="Host port your app's own compose file publishes as ${APP_METRICS_PORT}; sdk/go/metric listens on it inside the container."
+            >
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </div>
@@ -150,5 +187,7 @@ function toRequest(t: ApplicationEnvTarget): ApplicationEnvTargetRequest {
     enabled: t.enabled,
     health_check_enabled: t.health_check_enabled,
     health_check_path: t.health_check_path,
+    metrics_enabled: t.metrics_enabled,
+    metrics_port: t.metrics_port,
   }
 }

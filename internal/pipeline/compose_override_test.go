@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildOverrideYAML_PerServiceEnvDisambiguation(t *testing.T) {
-	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", []string{"api", "worker"}, nil)
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", "", []string{"api", "worker"}, nil)
 	if err != nil {
 		t.Fatalf("buildOverrideYAML: %v", err)
 	}
@@ -50,6 +50,44 @@ func TestBuildOverrideYAML_PerServiceEnvDisambiguation(t *testing.T) {
 	workerEnv := strings.Join(out.Services["worker"].Environment, "\n")
 	if apiEnv == workerEnv {
 		t.Fatal("api and worker services got identical env — log files would collide")
+	}
+}
+
+func TestBuildOverrideYAML_MetricsAddr(t *testing.T) {
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", ":9464", []string{"api"}, nil)
+	if err != nil {
+		t.Fatalf("buildOverrideYAML: %v", err)
+	}
+	var out struct {
+		Services map[string]struct {
+			Environment []string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal override: %v", err)
+	}
+	if !contains(out.Services["api"].Environment, "AGENDA_METRICS_ADDR=:9464") {
+		t.Errorf("expected AGENDA_METRICS_ADDR in env, got %v", out.Services["api"].Environment)
+	}
+}
+
+func TestBuildOverrideYAML_MetricsAddrEmpty_OmitsVar(t *testing.T) {
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", "", []string{"api"}, nil)
+	if err != nil {
+		t.Fatalf("buildOverrideYAML: %v", err)
+	}
+	var out struct {
+		Services map[string]struct {
+			Environment []string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal override: %v", err)
+	}
+	for _, e := range out.Services["api"].Environment {
+		if strings.HasPrefix(e, "AGENDA_METRICS_ADDR=") {
+			t.Errorf("expected no AGENDA_METRICS_ADDR when metricsAddr is empty, got %v", out.Services["api"].Environment)
+		}
 	}
 }
 

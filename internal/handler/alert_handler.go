@@ -8,6 +8,20 @@ import (
 	alertsdk "github.com/FredrickUnderwood/agenda-v2/sdk/go/alert"
 )
 
+// listAlertChannels reports every configured channel's name/type/enabled
+// state (never WebhookURL/Secret) — exists so the alert-rule form's channel
+// picker (and any future caller) can enumerate channels without parsing raw
+// "alert.channel.*" Setting keys client-side, duplicating
+// AlertService.ListChannels' key-parsing logic.
+func (s *Server) listAlertChannels(c *gin.Context) {
+	channels := s.alertSvc.ListChannels()
+	out := make([]gin.H, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, gin.H{"name": ch.Name, "type": ch.Type, "enabled": ch.Enabled})
+	}
+	Success(c, out)
+}
+
 type sendAlertRequest struct {
 	Title    string   `json:"title" binding:"required"`
 	Content  string   `json:"content"`

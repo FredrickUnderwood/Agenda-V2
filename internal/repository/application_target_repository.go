@@ -85,6 +85,18 @@ func (r *ApplicationTargetRepository) ListHealthCheckEnabled(ctx context.Context
 	return targets, nil
 }
 
+func (r *ApplicationTargetRepository) ListMetricsEnabled(ctx context.Context) ([]*domain.ApplicationEnvTarget, error) {
+	var targets []*domain.ApplicationEnvTarget
+	if err := r.db.WithContext(ctx).
+		Where("enabled = ? AND metrics_enabled = ?", true, true).
+		Order("application_id, env, instance_name").
+		Find(&targets).Error; err != nil {
+		logger.L().Error("failed to list metrics enabled targets", zap.Error(err))
+		return nil, err
+	}
+	return targets, nil
+}
+
 func (r *ApplicationTargetRepository) ListEnabledByMachinePort(ctx context.Context, machineID int64, port int) ([]*domain.ApplicationEnvTarget, error) {
 	var targets []*domain.ApplicationEnvTarget
 	if err := r.db.WithContext(ctx).
@@ -125,6 +137,8 @@ func (r *ApplicationTargetRepository) Upsert(ctx context.Context, target *domain
 				"health_check_interval_sec":      target.HealthCheckIntervalSec,
 				"health_check_failure_threshold": target.HealthCheckFailureThreshold,
 				"health_check_success_threshold": target.HealthCheckSuccessThreshold,
+				"metrics_enabled":                target.MetricsEnabled,
+				"metrics_port":                   target.MetricsPort,
 				"env_override_json":              target.EnvOverrideJSON,
 			}).Error; err != nil {
 			logger.L().Error("failed to update application target", zap.Int64("id", target.ID), zap.Error(err))

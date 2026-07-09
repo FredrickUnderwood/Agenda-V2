@@ -1,0 +1,50 @@
+package node
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+// fetchMetricsTimeout bounds a single local scrape. Short relative to the
+// log tail's read: a /metrics handler should respond fast, and a hung app
+// shouldn't block the node's response to the control plane for long.
+const fetchMetricsTimeout = 5 * time.Second
+
+// maxMetricsReadBytes caps how much of a /metrics response body we relay,
+// mirroring maxTailReadBytes's reasoning for log files — a runaway exporter
+// shouldn't be able to force an unbounded read into memory.
+const maxMetricsReadBytes = 2 << 20 // 2MB
+
+var metricsHTTPClient = &http.Client{Timeout: fetchMetricsTimeout}
+
+// fetchLocalMetrics GETs http://127.0.0.1:<port><path> — the app instance's
+// own metrics endpoint (sdk/go/metric), reachable only from this machine —
+// and returns the raw response body verbatim so it can be relayed to
+// Prometheus without agenda-node needing to understand exposition format.
+func fetchLocalMetrics(ctx context.Context, port int, path string) (body []byte, contentType string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchMetricsTimeout)
+	defer cancel()
+
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := metricsHTTPClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxMetricsReadBytes))
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("metrics endpoint returned %d", resp.StatusCode)
+	}
+	return body, resp.Header.Get("Content-Type"), nil
+}
