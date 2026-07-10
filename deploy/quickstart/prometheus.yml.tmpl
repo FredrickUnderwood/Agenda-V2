@@ -1,0 +1,37 @@
+# Quickstart variant of ../observability/prometheus.yml: targets use the
+# docker-compose service DNS names (gateway/control-plane) since Prometheus
+# runs on the same compose network here, instead of host.docker.internal.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: agenda-gateway
+    metrics_path: /-/metrics
+    static_configs:
+      - targets: ["gateway:8080"]
+
+  # Custom app metrics (sdk/go/metric), relayed through the control plane's
+  # single scrape entrypoint. Requires observability.prometheus_url +
+  # observability.scrape_token to be set as Settings first (Settings page or
+  # PUT /api/v1/settings/:key) — deploy.sh prints the values it generated.
+  - job_name: agenda-app-metrics
+    scrape_timeout: 8s
+    metrics_path: /api/v1/observability/app-metrics
+    authorization:
+      credentials: "${SCRAPE_TOKEN}"
+    http_sd_configs:
+      - url: http://control-plane:8080/api/v1/observability/scrape-targets
+        refresh_interval: 30s
+        authorization:
+          credentials: "${SCRAPE_TOKEN}"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__meta_agenda_app]
+        target_label: app
+      - source_labels: [__meta_agenda_env]
+        target_label: env
+      - source_labels: [__meta_agenda_instance]
+        target_label: instance
+      - target_label: __address__
+        replacement: control-plane:8080

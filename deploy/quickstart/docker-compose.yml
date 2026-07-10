@@ -1,0 +1,153 @@
+# All-in-one single-host quickstart: MySQL + Redis + all three agenda-v2
+# binaries (control plane, gateway, node) + the web console, on one docker
+# network. Every deploy target runs through agenda-node in "agent" mode, so
+# only the node container needs git/docker-cli (see cmd/agenda-node/Dockerfile).
+#
+# Don't hand-edit config/*.yaml or .env in this directory — both are generated
+# by ../../deploy.sh (idempotent; re-running preserves already-generated
+# secrets). Bring the stack up via that script, not `docker compose` directly,
+# unless you know what you're doing.
+#
+# Optional Prometheus + Grafana: `docker compose --profile observability up -d`.
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: agenda
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # Creates both agenda_v2 and agenda_gateway DBs + grants on first boot
+      # only (docker-entrypoint-initdb.d scripts run once, against an empty
+      # data dir). Control plane and gateway each AutoMigrate their own schema.
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: cmd/agenda-v2/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./config/agenda-v2.yaml:/app/config/agenda-v2.yaml:ro
+    ports:
+      - "${CONTROL_PLANE_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: cmd/agenda-gateway/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      GATEWAY_DATABASE_DSN: "agenda:${MYSQL_PASSWORD}@tcp(mysql:3306)/agenda_gateway?charset=utf8mb4&parseTime=True&loc=Local"
+      GATEWAY_SERVICE_TOKEN: ${GATEWAY_SERVICE_TOKEN}
+      GATEWAY_JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_ADDR: ":8080"
+    ports:
+      - "${GATEWAY_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/-/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  node:
+    build:
+      context: ../..
+      dockerfile: cmd/agenda-node/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    volumes:
+      - ./config/agenda-node.yaml:/app/config/agenda-node.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agenda-workspaces:/root/.agenda-v2/workspaces
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${NODE_MGMT_PORT:-7100}:7100"
+      - "${NODE_PROXY_PORT:-7200}:7200"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7100/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  web:
+    build:
+      context: ../../web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8090}:80"
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      # Rendered from prometheus.yml.tmpl by deploy.sh (substitutes the
+      # generated scrape token) — do not point this at the .tmpl directly.
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    profiles: ["observability"]
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
+volumes:
+  mysql-data:
+  agenda-workspaces:
+  prometheus-data:
+  grafana-data:

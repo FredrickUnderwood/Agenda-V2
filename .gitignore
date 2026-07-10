@@ -25,5 +25,9 @@ config/agenda-v2.yaml
 config/agenda-v2.*.yaml
 !config/agenda-v2.example.yaml
 
+# Quickstart deploy.sh output: generated secrets + rendered configs.
+deploy/quickstart/.env
+deploy/quickstart/config/
+
 # Logs
 *.log
