@@ -87,10 +87,13 @@ load_env() { set -a; source "$ENV_FILE"; set +a; }
 render_control_plane_config() {
     local out="$CONFIG_DIR/agenda-v2.yaml"
     mkdir -p "$CONFIG_DIR"
-    if [[ -f "$out" ]]; then
-        log "reusing existing config: $out"
-        return
-    fi
+    # Always re-render from the current .env, never cache. This file is 100%
+    # derived (see the "don't hand-edit" note in docker-compose.yml) — caching
+    # it let it silently drift out of sync with .env whenever .env changed
+    # (e.g. MYSQL_PASSWORD regenerated) but the config directory survived, which
+    # produces a control-plane MySQL auth failure that's very hard to diagnose
+    # (gateway reads its DSN live from .env via compose interpolation and keeps
+    # working, so only control-plane breaks).
     log "rendering $out"
     cat >"$out" <<EOF
 server:
