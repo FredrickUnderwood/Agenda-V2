@@ -302,7 +302,7 @@ cmd_up() {
     log "building and starting mysql, redis, control-plane, gateway, web"
     "${COMPOSE[@]}" up -d --build mysql redis control-plane gateway web
 
-    wait_for "control plane" "http://localhost:${CONTROL_PLANE_PORT}/api/v1/healthz"
+    wait_for "control plane" "http://localhost:${CONTROL_PLANE_PORT}/healthz"
     wait_for "gateway" "http://localhost:${GATEWAY_PORT}/-/health"
 
     bootstrap_node
@@ -323,7 +323,7 @@ cmd_status() {
     load_env 2>/dev/null || true
     "${COMPOSE[@]}" ps
     echo
-    for pair in "control-plane:http://localhost:${CONTROL_PLANE_PORT:-8080}/api/v1/healthz" \
+    for pair in "control-plane:http://localhost:${CONTROL_PLANE_PORT:-8080}/healthz" \
                 "gateway:http://localhost:${GATEWAY_PORT:-8081}/-/health" \
                 "node:http://localhost:${NODE_MGMT_PORT:-7100}/v1/health"; do
         name="${pair%%:*}"; url="${pair#*:}"
