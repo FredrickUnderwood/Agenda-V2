@@ -46,7 +46,7 @@ func main() {
 	mgmtSrv := &http.Server{Addr: cfg.ListenAddr, Handler: mgmt.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	// Data-plane reverse proxy (gateway backends point here), no auth.
-	proxySrv := &http.Server{Addr: cfg.ProxyListenAddr, Handler: node.NewProxyHandler(registry)}
+	proxySrv := &http.Server{Addr: cfg.ProxyListenAddr, Handler: node.NewProxyHandler(registry, cfg.ProxyBackendHost)}
 
 	// Heartbeat to the control plane.
 	node.NewHeartbeat(cfg.CentralBaseURL, cfg.MachineID, cfg.Token, cfg.HeartbeatInterval.Duration).Start(ctx)

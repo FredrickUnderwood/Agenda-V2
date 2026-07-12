@@ -156,6 +156,12 @@ render_node_config() {
     cat >"$out" <<EOF
 listen_addr: "0.0.0.0:7100"
 proxy_listen_addr: "0.0.0.0:7200"
+# node drives the host's dockerd over docker.sock in this quickstart topology
+# (docker-outside-of-docker) — deployed apps' published ports live on that
+# host, not inside node's own container network namespace, so the proxy must
+# forward to host.docker.internal (node's compose service has
+# extra_hosts: host.docker.internal:host-gateway) rather than 127.0.0.1.
+proxy_backend_host: "host.docker.internal"
 machine_id: ${machine_id}
 token: "${agent_token}"
 central_base_url: "http://control-plane:8080"

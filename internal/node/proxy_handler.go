@@ -10,14 +10,24 @@ import (
 
 // ProxyHandler is the data-plane reverse proxy on the proxy listen port. It
 // matches "/i/<instance>/<rest>", looks up the instance's current local port in
-// the registry, and forwards to 127.0.0.1:<port>. This is a dumb forwarder — it
-// does no health/circuit logic; routing decisions stay with the gateway.
+// the registry, and forwards to backendHost:<port>. This is a dumb forwarder —
+// it does no health/circuit logic; routing decisions stay with the gateway.
 type ProxyHandler struct {
-	registry *ProxyRegistry
+	registry    *ProxyRegistry
+	backendHost string
 }
 
-func NewProxyHandler(registry *ProxyRegistry) *ProxyHandler {
-	return &ProxyHandler{registry: registry}
+// NewProxyHandler builds a ProxyHandler. backendHost is the host apps'
+// published ports are reachable at from node's own network namespace —
+// "127.0.0.1" when node runs alongside the apps it deploys (bare metal/VM),
+// or "host.docker.internal" when node drives a separate host's dockerd over
+// docker.sock (docker-outside-of-docker) and apps' ports live on that host,
+// not inside node's own container. Empty defaults to "127.0.0.1".
+func NewProxyHandler(registry *ProxyRegistry, backendHost string) *ProxyHandler {
+	if backendHost == "" {
+		backendHost = "127.0.0.1"
+	}
+	return &ProxyHandler{registry: registry, backendHost: backendHost}
 }
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +41,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown instance: "+instance, http.StatusBadGateway)
 		return
 	}
-	target := &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}
+	target := &url.URL{Scheme: "http", Host: h.backendHost + ":" + strconv.Itoa(port)}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	r.URL.Path = rest
 	proxy.ServeHTTP(w, r)
