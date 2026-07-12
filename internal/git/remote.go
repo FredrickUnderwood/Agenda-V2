@@ -86,15 +86,16 @@ func Pull(ctx context.Context, repoURL, localPath, branch, commitSHA string, cfg
 	reused := checkErr == nil
 
 	if err := syncWorkspace(ctx, r, gitBin, authedURL, repoURL, localPath, branch, commitSHA, reused, cfg); err != nil {
-		if !reused {
-			return err
-		}
-		// The workspace looked like a valid repo (rev-parse succeeded) but
-		// fetch or reset still failed — most likely a directory left behind
-		// by a previously *failed* clone/fetch (e.g. a 403 mid-transfer),
-		// which has a .git dir but no usable refs. Wipe it and retry once
-		// with a fresh clone instead of failing every deploy from here on.
-		logger.L().Warn("git sync against existing workspace failed; removing it and retrying with a fresh clone",
+		// Wipe localPath and retry once with a fresh clone rather than
+		// failing every deploy from here on. Covers two shapes of stale
+		// state at that path: a directory that looks like a valid repo
+		// (rev-parse succeeded) but whose fetch/reset still failed — e.g.
+		// left behind by a previously *failed* clone/fetch (a 403
+		// mid-transfer) — and a non-git directory blocking a fresh clone
+		// outright (e.g. only a bind-mounted "logs" subdir exists there,
+		// from an app's log volume being set up before its repo was ever
+		// cloned into the same path).
+		logger.L().Warn("git sync failed; removing local workspace and retrying with a fresh clone",
 			zap.String("local_path", localPath),
 			zap.Error(err),
 		)

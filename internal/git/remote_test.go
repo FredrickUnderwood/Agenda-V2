@@ -78,10 +78,10 @@ func TestPullRecoversFromCorruptedWorkspace(t *testing.T) {
 	}
 }
 
-// TestPullFreshCloneFailureNotRetried ensures a failure on a genuinely fresh
-// clone (no pre-existing workspace) is returned as-is, with no retry — the
-// self-heal path is only for a *reused* workspace look-alike.
-func TestPullFreshCloneFailureNotRetried(t *testing.T) {
+// TestPullPersistentFailureReturnsError ensures a genuinely unrecoverable
+// failure (bad origin) still surfaces as an error after the one self-heal
+// retry, rather than looping or silently succeeding.
+func TestPullPersistentFailureReturnsError(t *testing.T) {
 	tmp := t.TempDir()
 	local := filepath.Join(tmp, "local")
 	cfg := &config.Config{}
@@ -91,6 +91,50 @@ func TestPullFreshCloneFailureNotRetried(t *testing.T) {
 		t.Fatal("expected error for nonexistent origin, got nil")
 	}
 	if _, statErr := os.Stat(local); !os.IsNotExist(statErr) {
-		t.Fatalf("expected no workspace directory to be created on clone failure, stat err = %v", statErr)
+		t.Fatalf("expected no workspace directory to be left behind, stat err = %v", statErr)
+	}
+}
+
+// TestPullRecoversFromNonGitDirectoryAtPath reproduces a fresh clone blocked
+// by a pre-existing, non-empty, non-git directory at localPath — e.g. only a
+// log-volume subdirectory was ever created there (bind-mounted before the
+// app's repo was cloned into the same path). rev-parse correctly reports "not
+// a repo" (reused=false) here, so this exercises the clone-side, not the
+// fetch/reset-side, of the self-heal retry.
+func TestPullRecoversFromNonGitDirectoryAtPath(t *testing.T) {
+	tmp := t.TempDir()
+	origin := filepath.Join(tmp, "origin")
+	local := filepath.Join(tmp, "local")
+
+	if err := os.MkdirAll(origin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, origin, "init", "--initial-branch=main")
+	if err := os.WriteFile(filepath.Join(origin, "file.txt"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, origin, "add", "file.txt")
+	runGit(t, origin, "commit", "-m", "initial")
+
+	// Stray non-git content already sitting at the target path, e.g. from a
+	// log-volume mount created before any clone ever happened.
+	if err := os.MkdirAll(filepath.Join(local, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "logs", "app.log"), []byte("stray"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	if err := Pull(context.Background(), origin, local, "main", "", cfg, nil); err != nil {
+		t.Fatalf("Pull did not recover from stray non-git directory: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(local, "file.txt"))
+	if err != nil {
+		t.Fatalf("reading recovered workspace: %v", err)
+	}
+	if string(got) != "v1" {
+		t.Fatalf("recovered workspace content = %q, want %q", got, "v1")
 	}
 }
