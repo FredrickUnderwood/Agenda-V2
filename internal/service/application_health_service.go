@@ -152,15 +152,29 @@ func (s *ApplicationHealthService) resolveHealthCheckURL(ctx context.Context, ta
 		return "", errors.New(fmt.Sprintf("%s/%s health check target port is required", target.Env, target.InstanceName))
 	}
 	host := strings.TrimSpace(target.HealthCheckHost)
+	var machine *domain.Machine
 	if host == "" && target.MachineID > 0 {
-		machine, err := s.machines.GetByID(ctx, target.MachineID)
+		m, err := s.machines.GetByID(ctx, target.MachineID)
 		if err != nil {
 			return "", err
 		}
+		machine = m
 		host = strings.TrimSpace(machine.Host)
 	}
 	if host == "" {
 		host = "127.0.0.1"
+		// Agent-mode machines run the deploy target's container via a
+		// separate agenda-node process/container (typically docker-outside-
+		// of-docker), never inside control-plane's own container — so
+		// control-plane's 127.0.0.1 can never reach it. host.docker.internal
+		// reaches whatever the target published on the physical host,
+		// mirroring the same convention already used for
+		// gateway.backend_host (internal/pipeline/builder.go). Requires
+		// control-plane's own container to have
+		// `extra_hosts: host.docker.internal:host-gateway` configured.
+		if machine != nil && machine.Mode == domain.MachineModeAgent {
+			host = "host.docker.internal"
+		}
 	}
 	hostPort := host
 	if _, _, err := net.SplitHostPort(host); err != nil {

@@ -50,6 +50,8 @@ services:
         condition: service_healthy
     volumes:
       - ./config/agenda-v2.yaml:/app/config/agenda-v2.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${CONTROL_PLANE_PORT:-8080}:8080"
     healthcheck:
@@ -92,7 +94,14 @@ services:
     volumes:
       - ./config/agenda-node.yaml:/app/config/agenda-node.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
-      - agenda-workspaces:/root/.agenda-v2/workspaces
+      # Bind-mounted at the *same absolute path* on host and in-container —
+      # required because node drives the host's dockerd over docker.sock
+      # (docker-outside-of-docker). Any bind-mount source path node computes
+      # (e.g. for an app's log dir) is resolved by the host daemon against
+      # the host filesystem, not node's own mount namespace, so a named
+      # volume here would silently desync node's view of a workspace from
+      # what app containers actually read/write.
+      - /root/.agenda-v2/workspaces:/root/.agenda-v2/workspaces
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -148,6 +157,5 @@ services:
 
 volumes:
   mysql-data:
-  agenda-workspaces:
   prometheus-data:
   grafana-data:
