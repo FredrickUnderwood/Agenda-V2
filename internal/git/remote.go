@@ -83,8 +83,41 @@ func Pull(ctx context.Context, repoURL, localPath, branch, commitSHA string, cfg
 
 	checkErr := r.RunCmd(ctx, "", gitBin, []string{"-C", localPath, "rev-parse", "--git-dir"}, &buf)
 	buf.Reset()
+	reused := checkErr == nil
 
-	if checkErr != nil {
+	if err := syncWorkspace(ctx, r, gitBin, authedURL, repoURL, localPath, branch, commitSHA, reused, cfg); err != nil {
+		if !reused {
+			return err
+		}
+		// The workspace looked like a valid repo (rev-parse succeeded) but
+		// fetch or reset still failed — most likely a directory left behind
+		// by a previously *failed* clone/fetch (e.g. a 403 mid-transfer),
+		// which has a .git dir but no usable refs. Wipe it and retry once
+		// with a fresh clone instead of failing every deploy from here on.
+		logger.L().Warn("git sync against existing workspace failed; removing it and retrying with a fresh clone",
+			zap.String("local_path", localPath),
+			zap.Error(err),
+		)
+		var rmBuf bytes.Buffer
+		if rmErr := r.RunCmd(ctx, "", "rm", []string{"-rf", localPath}, &rmBuf); rmErr != nil {
+			logger.L().Error("failed to remove stale workspace",
+				zap.String("local_path", localPath),
+				zap.Error(rmErr),
+			)
+			return err
+		}
+		return syncWorkspace(ctx, r, gitBin, authedURL, repoURL, localPath, branch, commitSHA, false, cfg)
+	}
+
+	return nil
+}
+
+// syncWorkspace performs one clone-or-fetch-then-reset cycle. reuse selects
+// fetch (existing workspace) vs. clone (fresh/missing workspace).
+func syncWorkspace(ctx context.Context, r runner.Runner, gitBin, authedURL, repoURL, localPath, branch, commitSHA string, reuse bool, cfg *config.Config) error {
+	var buf bytes.Buffer
+
+	if !reuse {
 		if err := r.RunCmd(ctx, "", gitBin,
 			[]string{"clone", "--branch", branch, "--single-branch", authedURL, localPath},
 			&buf,
@@ -110,7 +143,15 @@ func Pull(ctx context.Context, repoURL, localPath, branch, commitSHA string, cfg
 		}
 	}
 
-	resetTarget := "FETCH_HEAD"
+	// FETCH_HEAD is only written by `git fetch` (the reuse branch above) — a
+	// plain `git clone` never creates it, it just checks the branch out
+	// directly to HEAD. Resetting to FETCH_HEAD after a fresh clone would
+	// therefore always fail with "ambiguous argument 'FETCH_HEAD'", even on a
+	// perfectly healthy clone.
+	resetTarget := "HEAD"
+	if reuse {
+		resetTarget = "FETCH_HEAD"
+	}
 	if commitSHA != "" {
 		resetTarget = commitSHA
 	}
