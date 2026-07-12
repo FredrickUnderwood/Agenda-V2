@@ -245,6 +245,14 @@ func (s *ApplicationService) syncTargets(ctx context.Context, appID int64, reqs 
 	}
 	items := make([]targetSyncItem, 0, len(reqs))
 	routesByEnv := make(map[domain.Environment][]*domain.ApplicationGatewayRoute, len(reqs))
+	// routesProvidedEnv tracks which envs had at least one target request that
+	// explicitly set gateway_routes (nil vs. non-nil, not nil vs. empty — a
+	// target that omits the field entirely means "don't touch this env's
+	// routes", same as a multi-instance env's non-representative targets are
+	// expected to send an explicit `[]`). Without this, saving an unrelated
+	// field on any target (e.g. from the Instances tab) would sync an empty
+	// route list for that env and silently disable every route in it.
+	routesProvidedEnv := make(map[domain.Environment]bool, len(reqs))
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
 		return err
@@ -316,6 +324,9 @@ func (s *ApplicationService) syncTargets(ctx context.Context, appID int64, reqs 
 		if err != nil {
 			return err
 		}
+		if req.GatewayRoutes != nil {
+			routesProvidedEnv[env] = true
+		}
 
 		if target.Enabled && target.MachineID > 0 {
 			mpKey := targetMachinePortKey(target.MachineID, target.Port)
@@ -355,6 +366,12 @@ func (s *ApplicationService) syncTargets(ctx context.Context, appID int64, reqs 
 	}
 
 	for env, routes := range routesByEnv {
+		if !routesProvidedEnv[env] {
+			// No target in this request touched this env's routes at all —
+			// leave whatever is already stored (and live on the gateway)
+			// alone instead of syncing an empty list and disabling it.
+			continue
+		}
 		if err := s.routes.SyncByApplicationEnv(ctx, appID, env, routes); err != nil {
 			return err
 		}
