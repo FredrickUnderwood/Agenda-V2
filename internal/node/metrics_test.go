@@ -22,7 +22,7 @@ func TestServer_GetMetrics_RelaysBody(t *testing.T) {
 	defer app.Close()
 	port := appPort(t, app)
 
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default?"+url.Values{
 		contract.NodeMetricsQueryPort: {strconv.Itoa(port)},
 	}.Encode(), nil)
@@ -51,7 +51,7 @@ func TestServer_GetMetrics_CustomPath(t *testing.T) {
 	defer app.Close()
 	port := appPort(t, app)
 
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default?"+url.Values{
 		contract.NodeMetricsQueryPort: {strconv.Itoa(port)},
 		contract.NodeMetricsQueryPath: {"/custom"},
@@ -66,7 +66,7 @@ func TestServer_GetMetrics_CustomPath(t *testing.T) {
 }
 
 func TestServer_GetMetrics_MissingPort(t *testing.T) {
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default", nil)
 	req.Header.Set(contract.HeaderNodeToken, "tok")
 	rec := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestServer_GetMetrics_MissingPort(t *testing.T) {
 }
 
 func TestServer_GetMetrics_InvalidPath(t *testing.T) {
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default?"+url.Values{
 		contract.NodeMetricsQueryPort: {"9464"},
 		contract.NodeMetricsQueryPath: {"no-leading-slash"},
@@ -92,8 +92,31 @@ func TestServer_GetMetrics_InvalidPath(t *testing.T) {
 	}
 }
 
+func TestServer_GetMetrics_UsesConfiguredBackendHost(t *testing.T) {
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer app.Close()
+	port := appPort(t, app)
+
+	// "localhost" resolves the same as the default "127.0.0.1", but forcing it
+	// through the configured backendHost (rather than a hardcoded 127.0.0.1)
+	// proves the DooD-style override actually takes effect.
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "localhost")
+	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default?"+url.Values{
+		contract.NodeMetricsQueryPort: {strconv.Itoa(port)},
+	}.Encode(), nil)
+	req.Header.Set(contract.HeaderNodeToken, "tok")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestServer_GetMetrics_AppUnreachable_BadGateway(t *testing.T) {
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default?"+url.Values{
 		contract.NodeMetricsQueryPort: {"1"}, // nothing listens on port 1
 	}.Encode(), nil)
@@ -107,7 +130,7 @@ func TestServer_GetMetrics_AppUnreachable_BadGateway(t *testing.T) {
 }
 
 func TestServer_GetMetrics_RequiresToken(t *testing.T) {
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/metrics/myapp/default?"+url.Values{
 		contract.NodeMetricsQueryPort: {"9464"},
 	}.Encode(), nil)

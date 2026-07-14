@@ -19,7 +19,7 @@ import (
 func newTestNode(t *testing.T, token string) (*config.MachineConfig, func()) {
 	t.Helper()
 	jobs := node.NewJobStore(65536, time.Hour)
-	srv := node.NewServer(token, jobs, node.NewProxyRegistry())
+	srv := node.NewServer(token, jobs, node.NewProxyRegistry(), "")
 	ts := httptest.NewServer(srv.Handler())
 	mc := &config.MachineConfig{
 		Mode:              "agent",

@@ -21,23 +21,25 @@ import (
 // Commands execute locally via runner.New(nil) — the node reuses the exact same
 // localRunner the control plane uses, so it never reimplements command running.
 type Server struct {
-	token    string
-	jobs     *JobStore
-	registry *ProxyRegistry
-	local    runner.Runner
-	engine   *gin.Engine
-	started  time.Time
+	token       string
+	jobs        *JobStore
+	registry    *ProxyRegistry
+	local       runner.Runner
+	engine      *gin.Engine
+	started     time.Time
+	backendHost string
 }
 
-func NewServer(token string, jobs *JobStore, registry *ProxyRegistry) *Server {
+func NewServer(token string, jobs *JobStore, registry *ProxyRegistry, backendHost string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
-		token:    token,
-		jobs:     jobs,
-		registry: registry,
-		local:    runner.New(nil), // nil machine → localRunner
-		engine:   gin.New(),
-		started:  time.Now(),
+		token:       token,
+		jobs:        jobs,
+		registry:    registry,
+		local:       runner.New(nil), // nil machine → localRunner
+		engine:      gin.New(),
+		started:     time.Now(),
+		backendHost: backendHost,
 	}
 	s.engine.Use(gin.Recovery())
 	s.registerRoutes()
@@ -232,7 +234,7 @@ func (s *Server) getMetrics(c *gin.Context) {
 		return
 	}
 
-	body, contentType, err := fetchLocalMetrics(c.Request.Context(), port, path)
+	body, contentType, err := fetchLocalMetrics(c.Request.Context(), s.backendHost, port, path)
 	if err != nil {
 		c.String(http.StatusBadGateway, "%s", err.Error())
 		return

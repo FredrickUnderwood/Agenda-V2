@@ -42,7 +42,7 @@ func main() {
 	registry := node.NewProxyRegistry()
 
 	// Management API (jobs + proxy registration + health), token-protected.
-	mgmt := node.NewServer(cfg.Token, jobs, registry)
+	mgmt := node.NewServer(cfg.Token, jobs, registry, cfg.ProxyBackendHost)
 	mgmtSrv := &http.Server{Addr: cfg.ListenAddr, Handler: mgmt.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	// Data-plane reverse proxy (gateway backends point here), no auth.

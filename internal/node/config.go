@@ -20,15 +20,16 @@ type Config struct {
 	ListenAddr string `yaml:"listen_addr"`
 	// ProxyListenAddr is the reverse-proxy port gateway backends point at.
 	ProxyListenAddr string `yaml:"proxy_listen_addr"`
-	// ProxyBackendHost is the host ProxyHandler forwards to (paired with a
-	// registered instance's port). Defaults to 127.0.0.1, correct when node
-	// runs bare-metal/VM alongside the apps it deploys. When node instead
-	// drives a separate host's dockerd over docker.sock (docker-outside-of-
-	// docker, e.g. this repo's deploy/quickstart topology), the app's
-	// published port lives on that host, not in node's own container network
-	// namespace — set this to "host.docker.internal" (with node's container
-	// given `extra_hosts: host.docker.internal:host-gateway`) so the proxy
-	// can actually reach it.
+	// ProxyBackendHost is the host used to reach a locally-registered app
+	// instance's published port — both ProxyHandler's reverse proxy and the
+	// metrics relay (fetchLocalMetrics) use it. Defaults to 127.0.0.1, correct
+	// when node runs bare-metal/VM alongside the apps it deploys. When node
+	// instead drives a separate host's dockerd over docker.sock (docker-
+	// outside-of-docker, e.g. this repo's deploy/quickstart topology), the
+	// app's published port lives on that host, not in node's own container
+	// network namespace — set this to "host.docker.internal" (with node's
+	// container given `extra_hosts: host.docker.internal:host-gateway`) so
+	// both can actually reach it.
 	ProxyBackendHost string `yaml:"proxy_backend_host"`
 	// MachineID matches the control plane's machine.id for heartbeats.
 	MachineID int64 `yaml:"machine_id"`

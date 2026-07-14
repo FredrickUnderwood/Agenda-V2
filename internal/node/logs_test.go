@@ -80,7 +80,7 @@ func TestServer_GetLogs_SingleFile(t *testing.T) {
 	dir := t.TempDir()
 	writeLogFile(t, dir, "myapp__default.log", 5)
 
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/logs/myapp/default?dir="+dir+"&tail=2", nil)
 	req.Header.Set(contract.HeaderNodeToken, "tok")
 	rec := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestServer_GetLogs_MultiServiceFilteredByServiceParam(t *testing.T) {
 	writeLogFile(t, dir, "myapp__default__api.log", 1)
 	writeLogFile(t, dir, "myapp__default__worker.log", 1)
 
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/logs/myapp/default?dir="+dir+"&service=worker", nil)
 	req.Header.Set(contract.HeaderNodeToken, "tok")
 	rec := httptest.NewRecorder()
@@ -125,7 +125,7 @@ func TestServer_GetLogs_MultiServiceFilteredByServiceParam(t *testing.T) {
 }
 
 func TestServer_GetLogs_MissingDirParam(t *testing.T) {
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/logs/myapp/default", nil)
 	req.Header.Set(contract.HeaderNodeToken, "tok")
 	rec := httptest.NewRecorder()
@@ -138,7 +138,7 @@ func TestServer_GetLogs_MissingDirParam(t *testing.T) {
 
 func TestServer_GetLogs_NotFound(t *testing.T) {
 	dir := t.TempDir()
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/logs/nope/default?dir="+dir, nil)
 	req.Header.Set(contract.HeaderNodeToken, "tok")
 	rec := httptest.NewRecorder()
@@ -152,7 +152,7 @@ func TestServer_GetLogs_NotFound(t *testing.T) {
 func TestServer_GetLogs_RequiresToken(t *testing.T) {
 	dir := t.TempDir()
 	writeLogFile(t, dir, "myapp__default.log", 1)
-	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry())
+	s := NewServer("tok", NewJobStore(1024, 0), NewProxyRegistry(), "")
 	req := httptest.NewRequest(http.MethodGet, "/v1/logs/myapp/default?dir="+dir, nil)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
