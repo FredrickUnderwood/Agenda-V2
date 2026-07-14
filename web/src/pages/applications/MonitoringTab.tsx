@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Alert, Input, Space, Typography } from 'antd'
-import { getGrafanaBaseUrl, panelEmbedUrl, setGrafanaBaseUrl } from '@/utils/grafana'
+import { Alert, Input, Select, Space, Typography } from 'antd'
+import { DEFAULT_TIME_RANGE_FROM, getGrafanaBaseUrl, panelEmbedUrl, setGrafanaBaseUrl, TIME_RANGE_OPTIONS } from '@/utils/grafana'
 
 export function MonitoringTab({ serviceName }: { serviceName: string }) {
   const [baseUrl, setBaseUrl] = useState(getGrafanaBaseUrl())
+  const [from, setFrom] = useState<string>(DEFAULT_TIME_RANGE_FROM)
 
   return (
     <div>
@@ -30,6 +31,14 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
           onChange={(e) => setBaseUrl(e.target.value)}
           onBlur={() => setGrafanaBaseUrl(baseUrl)}
         />
+        <Typography.Text type="secondary">Time range</Typography.Text>
+        <Select
+          size="small"
+          style={{ width: 120 }}
+          value={from}
+          onChange={setFrom}
+          options={TIME_RANGE_OPTIONS.map((o) => ({ label: o.label, value: o.from }))}
+        />
       </Space>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -39,7 +48,7 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
           </Typography.Text>
           <iframe
             title="Error rate"
-            src={panelEmbedUrl(baseUrl, 1)}
+            src={panelEmbedUrl(baseUrl, 1, from)}
             style={{ width: '100%', height: 280, border: '1px solid #E4E0D6', borderRadius: 8 }}
           />
         </div>
@@ -49,7 +58,7 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
           </Typography.Text>
           <iframe
             title="P99 latency"
-            src={panelEmbedUrl(baseUrl, 2)}
+            src={panelEmbedUrl(baseUrl, 2, from)}
             style={{ width: '100%', height: 280, border: '1px solid #E4E0D6', borderRadius: 8 }}
           />
         </div>
