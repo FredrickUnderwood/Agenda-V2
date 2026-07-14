@@ -5,9 +5,10 @@ scrape_configs:
   - job_name: agenda-gateway
     metrics_path: /-/metrics
     static_configs:
-      # Edit this if your gateway isn't reachable at host.docker.internal:8080
-      # (e.g. it's on another machine, or GATEWAY_ADDR is non-default).
-      - targets: ["host.docker.internal:8080"]
+      # Edit this if your gateway isn't reachable at host.docker.internal:8081
+      # (deploy/quickstart's GATEWAY_PORT default — e.g. it's on another
+      # machine, or GATEWAY_PORT/GATEWAY_ADDR is non-default).
+      - targets: ["host.docker.internal:8081"]
 
   # Custom app metrics (sdk/go/metric). The control plane is the single
   # scrape entrypoint — it relays each target's /metrics through that
@@ -22,10 +23,11 @@ scrape_configs:
       credentials: "<observability.scrape_token setting value>"
     http_sd_configs:
       # Edit this if your control plane isn't reachable at
-      # host.docker.internal:8081 (e.g. it's on another machine, or
+      # host.docker.internal:8080 (deploy/quickstart's CONTROL_PLANE_PORT
+      # default — e.g. it's on another machine, or CONTROL_PLANE_PORT/
       # server.addr is non-default). This must match the control-plane
       # host:port used below in the __address__ replacement.
-      - url: http://host.docker.internal:8081/api/v1/observability/scrape-targets
+      - url: http://host.docker.internal:8080/api/v1/observability/scrape-targets
         refresh_interval: 30s
         authorization:
           credentials: "<observability.scrape_token setting value>"
@@ -44,4 +46,4 @@ scrape_configs:
       - source_labels: [__meta_agenda_instance]
         target_label: instance
       - target_label: __address__
-        replacement: host.docker.internal:8081
+        replacement: host.docker.internal:8080

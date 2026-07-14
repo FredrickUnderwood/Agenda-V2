@@ -8,8 +8,9 @@ app). Independent of how/where the gateway itself is deployed.
 ## Bring it up
 
 1. Edit `prometheus.yml`'s target if your gateway isn't reachable at
-   `host.docker.internal:8080` (e.g. it's on another machine, or
-   `GATEWAY_ADDR` is non-default).
+   `host.docker.internal:8081` (deploy/quickstart's `GATEWAY_PORT` default —
+   e.g. it's on another machine, or `GATEWAY_PORT`/`GATEWAY_ADDR` is
+   non-default).
 2. `docker compose -f deploy/observability/docker-compose.yml up -d`
 3. Prometheus: http://localhost:9090 — check **Status → Targets**, the
    `agenda-gateway` job should be `UP`.
@@ -69,8 +70,9 @@ Setup:
    `observability.scrape_token` (any random secret — the bearer token
    Prometheus presents back to the control plane; mark it `is_secret`).
 5. Add the `agenda-app-metrics` job from `prometheus.yml` to your Prometheus
-   config (already included in this add-on's `prometheus.yml`), pointing
-   `http_sd_configs`/`__address__` at wherever the control plane actually
-   listens.
+   config (already included in this add-on's `prometheus.yml`, defaulting to
+   `host.docker.internal:8080` — deploy/quickstart's `CONTROL_PLANE_PORT`
+   default), pointing `http_sd_configs`/`__address__` at wherever the control
+   plane actually listens.
 6. Check Prometheus's **Status → Targets** — enabled instances should appear
    under the `agenda-app-metrics` job as `UP`.
