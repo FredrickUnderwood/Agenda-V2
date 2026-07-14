@@ -40,8 +40,8 @@ export function AppLayout() {
   ]
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider width={216} style={{ display: 'flex', flexDirection: 'column' }}>
+    <Layout style={{ height: '100vh', overflow: 'hidden' }}>
+      <Sider width={216} style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'auto' }}>
         <div
           className="agenda-display"
           style={{
@@ -64,7 +64,7 @@ export function AppLayout() {
           style={{ flex: 1, borderInlineEnd: 'none' }}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ height: '100vh', overflow: 'hidden' }}>
         <Header
           style={{
             display: 'flex',
@@ -85,7 +85,7 @@ export function AppLayout() {
             </div>
           </Dropdown>
         </Header>
-        <Content style={{ padding: 24 }}>
+        <Content style={{ padding: 24, overflow: 'auto', flex: 1, minHeight: 0 }}>
           <Outlet />
         </Content>
       </Layout>

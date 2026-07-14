@@ -1,10 +1,11 @@
 import { useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Divider, Form, Input, Select, Space, Typography } from 'antd'
+import { App, Button, Collapse, Form, Input, Select, Space, Typography } from 'antd'
+import type { CollapseProps } from 'antd'
 import * as api from '@/api/applications'
 import type { Application, DeployMethod, UpdateApplicationRequest } from '@/api/types'
 import { errorMessage } from '@/utils/errorMessage'
-import { DeployConfigFields } from './DeployConfigFields'
+import { DeployConfigFields, DockerHealthCheckFields } from './DeployConfigFields'
 import { buildDeployConfig, parseDeployConfig, type DeployConfigForm } from './deployConfig'
 
 interface OverviewFormValues extends DeployConfigForm {
@@ -51,35 +52,60 @@ export function OverviewTab({ app }: { app: Application }) {
     })
   }
 
+  // Each section is a Collapse panel so the (long) form can be folded down to
+  // just the module the user cares about. forceRender keeps collapsed fields
+  // mounted — otherwise setFieldsValue and submit would drop their values.
+  const items: CollapseProps['items'] = [
+    {
+      key: 'basics',
+      label: sectionLabel('Basics', 'Name, repository, and how this app deploys'),
+      forceRender: true,
+      children: (
+        <>
+          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="repo_url" label="Repository URL" rules={[{ required: true }]}>
+            <Input className="agenda-mono" />
+          </Form.Item>
+          <Form.Item name="deploy_method" label="Deploy method">
+            <Select
+              options={[
+                { value: 'docker', label: 'Docker Compose' },
+                { value: 'api', label: 'HTTP webhook' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="description" label="Description" style={{ marginBottom: 0 }}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </>
+      ),
+    },
+    {
+      key: 'deploy',
+      label: sectionLabel('Deploy config', method === 'api' ? 'Webhook request sent on deploy' : 'Compose file, services, env vars'),
+      forceRender: true,
+      children: <DeployConfigFields method={method} />,
+    },
+  ]
+
+  // Health check only applies to the docker deploy method.
+  if (method !== 'api') {
+    items.push({
+      key: 'health',
+      label: sectionLabel('Health check', 'Wait for containers to become healthy after deploy'),
+      forceRender: true,
+      children: <DockerHealthCheckFields />,
+    })
+  }
+
   return (
-    <div style={{ maxWidth: 640 }}>
+    <div style={{ maxWidth: 680 }}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={handleFinish}>
-        <Form.Item name="name" label="Name" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Form.Item name="repo_url" label="Repository URL" rules={[{ required: true }]}>
-          <Input className="agenda-mono" />
-        </Form.Item>
-        <Form.Item name="deploy_method" label="Deploy method">
-          <Select
-            options={[
-              { value: 'docker', label: 'Docker Compose' },
-              { value: 'api', label: 'HTTP webhook' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item name="description" label="Description">
-          <Input.TextArea rows={2} />
-        </Form.Item>
+        <Collapse defaultActiveKey={['basics', 'deploy']} items={items} />
 
-        <Divider titlePlacement="start" plain>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            Deploy config
-          </Typography.Text>
-        </Divider>
-        <DeployConfigFields method={method} />
-
-        <Space style={{ marginTop: 8 }}>
+        <Space style={{ marginTop: 16 }}>
           <Button type="primary" htmlType="submit" loading={updateMutation.isPending}>
             Save changes
           </Button>
@@ -89,5 +115,16 @@ export function OverviewTab({ app }: { app: Application }) {
         Application #{app.id} · created {new Date(app.created_at).toLocaleString()}
       </Typography.Paragraph>
     </div>
+  )
+}
+
+function sectionLabel(title: string, hint: string) {
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column' }}>
+      <Typography.Text strong>{title}</Typography.Text>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {hint}
+      </Typography.Text>
+    </span>
   )
 }

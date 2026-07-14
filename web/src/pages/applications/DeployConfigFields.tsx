@@ -1,4 +1,4 @@
-import { Button, Divider, Form, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
+import { Button, Form, Input, InputNumber, Select, Space, Switch } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import type { DeployMethod } from '@/api/types'
 
@@ -88,12 +88,15 @@ function DockerFields() {
       <Form.Item label="Environment variables" extra="Application-level baseline, overridden per environment and per instance.">
         <KeyValueList name={['docker', 'env']} keyPlaceholder="KEY" valuePlaceholder="value" addLabel="Add variable" />
       </Form.Item>
+    </>
+  )
+}
 
-      <Divider titlePlacement="start" plain style={{ marginTop: 4 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          Health check
-        </Typography.Text>
-      </Divider>
+// Split out of DockerFields so OverviewTab can give it its own collapsible
+// section. Only relevant for the docker deploy method.
+export function DockerHealthCheckFields() {
+  return (
+    <>
       <Form.Item name={['docker', 'health_check', 'enabled']} label="Wait for containers to become healthy" valuePropName="checked">
         <Switch />
       </Form.Item>
