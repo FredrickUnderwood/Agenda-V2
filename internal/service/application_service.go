@@ -219,6 +219,10 @@ func (s *ApplicationService) GetTargetForEnvInstance(ctx context.Context, appID 
 }
 
 func (s *ApplicationService) ListTargetsByApplication(ctx context.Context, appID int64, env domain.Environment) ([]*domain.ApplicationEnvTarget, error) {
+	app, err := s.apps.GetByID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
 	targets, err := s.targets.ListByApplication(ctx, appID)
 	if err != nil {
 		return nil, err
@@ -231,6 +235,9 @@ func (s *ApplicationService) ListTargetsByApplication(ctx context.Context, appID
 		filtered = append(filtered, target)
 	}
 	if err := s.attachHealthToTargets(ctx, filtered); err != nil {
+		return nil, err
+	}
+	if err := s.attachGatewayRoutesToTargets(ctx, app, filtered); err != nil {
 		return nil, err
 	}
 	return filtered, nil
