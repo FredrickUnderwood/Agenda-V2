@@ -1,22 +1,34 @@
 import { useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Form, Input, Select, Space, Typography } from 'antd'
+import { App, Button, Divider, Form, Input, Select, Space, Typography } from 'antd'
 import * as api from '@/api/applications'
-import type { Application, UpdateApplicationRequest } from '@/api/types'
+import type { Application, DeployMethod, UpdateApplicationRequest } from '@/api/types'
 import { errorMessage } from '@/utils/errorMessage'
+import { DeployConfigFields } from './DeployConfigFields'
+import { buildDeployConfig, parseDeployConfig, type DeployConfigForm } from './deployConfig'
+
+interface OverviewFormValues extends DeployConfigForm {
+  name: string
+  repo_url: string
+  deploy_method: DeployMethod
+  description?: string
+}
 
 export function OverviewTab({ app }: { app: Application }) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [form] = Form.useForm<UpdateApplicationRequest>()
+  const [form] = Form.useForm<OverviewFormValues>()
+  const method = Form.useWatch('deploy_method', form) ?? app.deploy_method
 
   useEffect(() => {
+    const cfg = parseDeployConfig(app.deploy_config, app.deploy_method)
     form.setFieldsValue({
       name: app.name,
       repo_url: app.repo_url,
       deploy_method: app.deploy_method,
       description: app.description,
-      deploy_config: app.deploy_config,
+      docker: cfg.docker,
+      api: cfg.api,
     })
   }, [app, form])
 
@@ -29,9 +41,19 @@ export function OverviewTab({ app }: { app: Application }) {
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
 
+  const handleFinish = (v: OverviewFormValues) => {
+    updateMutation.mutate({
+      name: v.name,
+      repo_url: v.repo_url,
+      deploy_method: v.deploy_method,
+      description: v.description,
+      deploy_config: buildDeployConfig({ docker: v.docker, api: v.api }, v.deploy_method),
+    })
+  }
+
   return (
     <div style={{ maxWidth: 640 }}>
-      <Form form={form} layout="vertical" requiredMark={false} onFinish={(v) => updateMutation.mutate(v)}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={handleFinish}>
         <Form.Item name="name" label="Name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
@@ -49,14 +71,15 @@ export function OverviewTab({ app }: { app: Application }) {
         <Form.Item name="description" label="Description">
           <Input.TextArea rows={2} />
         </Form.Item>
-        <Form.Item
-          name="deploy_config"
-          label="Deploy config (JSON)"
-          extra="Docker: work_dir, compose_file, services, pre_commands, env, health_check. See doc/ for the full shape."
-        >
-          <Input.TextArea rows={10} className="agenda-mono" />
-        </Form.Item>
-        <Space>
+
+        <Divider titlePlacement="start" plain>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            Deploy config
+          </Typography.Text>
+        </Divider>
+        <DeployConfigFields method={method} />
+
+        <Space style={{ marginTop: 8 }}>
           <Button type="primary" htmlType="submit" loading={updateMutation.isPending}>
             Save changes
           </Button>
