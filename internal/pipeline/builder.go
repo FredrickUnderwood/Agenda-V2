@@ -275,7 +275,10 @@ func (b *Builder) buildGatewayRouteSync(ctx context.Context, target *domain.Depl
 		if pathPrefix == "" {
 			pathPrefix = "/"
 		}
-		selfURL, selfProxyBase, selfProxyToken, selfProxyPort := b.resolveBackend(machine, scheme, selfInstanceName, port, route.BackendPath)
+		selfURL, selfProxyBase, selfProxyToken, selfProxyPort, err := b.resolveBackend(machine, scheme, selfInstanceName, port, route.BackendPath)
+		if err != nil {
+			return Blueprint{}, err
+		}
 		self := GatewayBackendSpec{
 			InstanceName:      selfInstanceName,
 			TargetKey:         selfTargetKey,
@@ -415,7 +418,10 @@ func (b *Builder) backendSpecForTarget(ctx context.Context, t *domain.Applicatio
 	if t.HealthCheckEnabled {
 		healthy = t.Health != nil && t.Health.Status == domain.HealthStatusHealthy
 	}
-	url, proxyBase, proxyToken, proxyPort := b.resolveBackend(machine, scheme, instanceName, t.Port, backendPath)
+	url, proxyBase, proxyToken, proxyPort, err := b.resolveBackend(machine, scheme, instanceName, t.Port, backendPath)
+	if err != nil {
+		return GatewayBackendSpec{}, false
+	}
 	return GatewayBackendSpec{
 		InstanceName:      instanceName,
 		TargetKey:         targetKey,
@@ -443,14 +449,23 @@ func (b *Builder) resolveBackendHost(machine *config.MachineConfig) string {
 // the URL points at the node's stable proxy path (proxyBaseURL + /i/<instance>),
 // hiding the drifting real port from the gateway; the real port is instead
 // registered with the node. In ssh/local mode the URL is the direct host:port
-// (current behavior) and the proxy fields are empty.
-func (b *Builder) resolveBackend(machine *config.MachineConfig, scheme, instanceName string, port int, backendPath string) (url, proxyBaseURL, proxyToken string, proxyPort int) {
-	if machine != nil && machine.IsAgent() && machine.AgentProxyBaseURL != "" {
+// and the proxy fields are empty.
+//
+// An agent machine with an empty AgentProxyBaseURL is a misconfiguration and
+// returns an error rather than silently falling back to host.docker.internal —
+// that fallback is a control-plane-host concept and would route gateway traffic
+// to the wrong machine (the same class of single-machine bug fixed in the
+// health monitor). host.docker.internal is only ever valid for ssh/local.
+func (b *Builder) resolveBackend(machine *config.MachineConfig, scheme, instanceName string, port int, backendPath string) (url, proxyBaseURL, proxyToken string, proxyPort int, err error) {
+	if machine != nil && machine.IsAgent() {
+		if machine.AgentProxyBaseURL == "" {
+			return "", "", "", 0, errors.New("agent-mode machine has no agent_proxy_base_url; cannot resolve gateway backend")
+		}
 		proxyURL := strings.TrimRight(machine.AgentProxyBaseURL, "/") + "/i/" + instanceName + backendPath
-		return proxyURL, machine.AgentBaseURL, machine.AgentToken, port
+		return proxyURL, machine.AgentBaseURL, machine.AgentToken, port, nil
 	}
 	host := b.resolveBackendHost(machine)
-	return backendURL(scheme, host, port, backendPath), "", "", 0
+	return backendURL(scheme, host, port, backendPath), "", "", 0, nil
 }
 
 func backendURL(scheme, host string, port int, backendPath string) string {

@@ -113,7 +113,7 @@ func TestCreateAgentMachineGeneratesAndEncryptsToken(t *testing.T) {
 	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
 
 	_, plaintext, err := svc.Create(context.Background(), CreateMachineRequest{
-		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100", AgentProxyBaseURL: "http://n:7200",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -134,7 +134,7 @@ func TestGetDecryptsAgentToken(t *testing.T) {
 	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
 
 	_, plaintext, err := svc.Create(context.Background(), CreateMachineRequest{
-		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100", AgentProxyBaseURL: "http://n:7200",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -153,7 +153,7 @@ func TestHeartbeatAcceptsGeneratedTokenAfterEncryption(t *testing.T) {
 	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
 
 	_, plaintext, err := svc.Create(context.Background(), CreateMachineRequest{
-		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100", AgentProxyBaseURL: "http://n:7200",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -168,7 +168,7 @@ func TestRotateAgentTokenInvalidatesOldToken(t *testing.T) {
 	svc := NewMachineService(repo, secret.NewBox("test-master-key"))
 
 	_, oldToken, err := svc.Create(context.Background(), CreateMachineRequest{
-		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100",
+		Name: "m1", Mode: domain.MachineModeAgent, AgentBaseURL: "http://n:7100", AgentProxyBaseURL: "http://n:7200",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -189,19 +189,22 @@ func TestRotateAgentTokenInvalidatesOldToken(t *testing.T) {
 }
 
 func TestValidateMachineMode(t *testing.T) {
-	if err := validateMachineMode(domain.MachineModeAgent, "", ""); err == nil {
+	if err := validateMachineMode(domain.MachineModeAgent, "", "", "http://n:7200"); err == nil {
 		t.Error("agent without agent_base_url should fail")
 	}
-	if err := validateMachineMode(domain.MachineModeAgent, "", "http://n:7100"); err != nil {
-		t.Errorf("agent with base url should pass: %v", err)
+	if err := validateMachineMode(domain.MachineModeAgent, "", "http://n:7100", ""); err == nil {
+		t.Error("agent without agent_proxy_base_url should fail")
 	}
-	if err := validateMachineMode(domain.MachineModeSSH, "", ""); err == nil {
+	if err := validateMachineMode(domain.MachineModeAgent, "", "http://n:7100", "http://n:7200"); err != nil {
+		t.Errorf("agent with base + proxy url should pass: %v", err)
+	}
+	if err := validateMachineMode(domain.MachineModeSSH, "", "", ""); err == nil {
 		t.Error("ssh without host should fail")
 	}
-	if err := validateMachineMode(domain.MachineModeSSH, "10.0.0.1", ""); err != nil {
+	if err := validateMachineMode(domain.MachineModeSSH, "10.0.0.1", "", ""); err != nil {
 		t.Errorf("ssh with host should pass: %v", err)
 	}
-	if err := validateMachineMode("bogus", "h", "u"); err == nil {
+	if err := validateMachineMode("bogus", "h", "u", "p"); err == nil {
 		t.Error("bogus mode should fail")
 	}
 }

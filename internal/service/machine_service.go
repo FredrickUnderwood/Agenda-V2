@@ -97,7 +97,7 @@ func (s *MachineService) Create(ctx context.Context, req CreateMachineRequest) (
 	if mode == "" {
 		mode = domain.MachineModeSSH
 	}
-	if err := validateMachineMode(mode, req.Host, req.AgentBaseURL); err != nil {
+	if err := validateMachineMode(mode, req.Host, req.AgentBaseURL, req.AgentProxyBaseURL); err != nil {
 		return nil, "", err
 	}
 
@@ -142,12 +142,21 @@ func (s *MachineService) Create(ctx context.Context, req CreateMachineRequest) (
 }
 
 // validateMachineMode enforces the minimum fields each mode needs: SSH needs a
-// Host, agent needs an AgentBaseURL.
-func validateMachineMode(mode domain.MachineMode, host, agentBaseURL string) error {
+// Host; agent needs both an AgentBaseURL (management API) and an
+// AgentProxyBaseURL (data-plane reverse proxy the gateway backends point at).
+// Requiring the proxy URL up front prevents a class of single-machine bug: a
+// gateway backend on an agent machine with no proxy URL would otherwise fall
+// back to host.docker.internal (a control-plane-host concept) and route to the
+// wrong machine. agenda-node always listens on both ports, so both URLs are
+// always available to configure.
+func validateMachineMode(mode domain.MachineMode, host, agentBaseURL, agentProxyBaseURL string) error {
 	switch mode {
 	case domain.MachineModeAgent:
 		if agentBaseURL == "" {
 			return errors.New("agent_base_url is required for agent-mode machines")
+		}
+		if agentProxyBaseURL == "" {
+			return errors.New("agent_proxy_base_url is required for agent-mode machines")
 		}
 	case domain.MachineModeSSH:
 		if host == "" {
@@ -254,7 +263,7 @@ func (s *MachineService) Update(ctx context.Context, id int64, req UpdateMachine
 		}
 		m.AgentToken = enc
 	}
-	if err := validateMachineMode(m.Mode, m.Host, m.AgentBaseURL); err != nil {
+	if err := validateMachineMode(m.Mode, m.Host, m.AgentBaseURL, m.AgentProxyBaseURL); err != nil {
 		return nil, err
 	}
 	if err := s.machines.Update(ctx, m); err != nil {
