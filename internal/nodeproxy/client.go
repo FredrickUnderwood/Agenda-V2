@@ -145,3 +145,64 @@ func FetchMetrics(ctx context.Context, agentBaseURL, agentToken, app, instance s
 	}
 	return respBody, resp.Header.Get("Content-Type"), nil
 }
+
+// Probe asks the node at agentBaseURL to health-probe app/instance's own
+// endpoint (listening on the given local port) and relay the upstream result.
+// Used by the control-plane health monitor for agent-mode machines, whose app
+// ports it cannot reach directly. A transport error to the node itself (node
+// offline/unreachable) is returned as err — the caller treats that as a failed
+// probe, so an offline node correctly drives its instances unhealthy. When the
+// node is reachable the returned NodeProbeResponse carries the app's real
+// status (or its own connection error) for the caller to judge.
+func Probe(ctx context.Context, agentBaseURL, agentToken, app, instance, scheme, method, path string, port, timeoutMS int) (*contract.NodeProbeResponse, error) {
+	base := strings.TrimRight(agentBaseURL, "/")
+	if base == "" {
+		return nil, errors.New("agent_base_url is empty; cannot probe")
+	}
+	u, err := url.Parse(base + "/v1/probe/" + url.PathEscape(app) + "/" + url.PathEscape(instance))
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set(contract.NodeProbeQueryPort, strconv.Itoa(port))
+	if path != "" {
+		q.Set(contract.NodeProbeQueryPath, path)
+	}
+	if scheme != "" {
+		q.Set(contract.NodeProbeQueryScheme, scheme)
+	}
+	if method != "" {
+		q.Set(contract.NodeProbeQueryMethod, method)
+	}
+	if timeoutMS > 0 {
+		q.Set(contract.NodeProbeQueryTimeoutMS, strconv.Itoa(timeoutMS))
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(contract.HeaderNodeToken, agentToken)
+	// Give the node a little headroom over the app-probe timeout it will apply
+	// locally, so the node's own bounded probe returns before this call gives up.
+	nodeTimeout := time.Duration(timeoutMS)*time.Millisecond + 10*time.Second
+	client := &http.Client{Timeout: nodeTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.New("probe failed: " + resp.Status + ": " + strings.TrimSpace(string(body)))
+	}
+	var out contract.NodeProbeResponse
+	if err := sonic.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

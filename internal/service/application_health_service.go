@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/nodeproxy"
 	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
 )
 
 type ApplicationHealthService struct {
+	apps     *repository.ApplicationRepository
 	targets  *repository.ApplicationTargetRepository
 	health   *repository.ApplicationInstanceHealthRepository
 	machines *repository.MachineRepository
@@ -23,11 +25,13 @@ type ApplicationHealthService struct {
 }
 
 func NewApplicationHealthService(
+	apps *repository.ApplicationRepository,
 	targets *repository.ApplicationTargetRepository,
 	health *repository.ApplicationInstanceHealthRepository,
 	machines *repository.MachineRepository,
 ) *ApplicationHealthService {
 	return &ApplicationHealthService{
+		apps:     apps,
 		targets:  targets,
 		health:   health,
 		machines: machines,
@@ -71,45 +75,117 @@ func (s *ApplicationHealthService) CheckTarget(ctx context.Context, target *doma
 	if target.HealthCheckType != "http" {
 		return nil, errors.New(fmt.Sprintf("health check type %q is not supported", target.HealthCheckType))
 	}
-	checkURL, err := s.resolveHealthCheckURL(ctx, target)
+
+	httpStatus, latencyMS, checkErr := s.probe(ctx, target)
+	now := time.Now()
+
+	prev, err := s.health.GetByTargetID(ctx, target.ID)
 	if err != nil {
 		return nil, err
 	}
+	next := buildHealthResult(target, prev, now, latencyMS, httpStatus, checkErr)
+	if err := s.health.Upsert(ctx, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
 
+// probe runs one health check and returns the app's HTTP status, the probe
+// latency in ms, and a non-nil checkErr when the app was unreachable or
+// returned an unexpected status. It picks the reachability path by machine
+// mode: agent-mode machines' app ports live on a (possibly remote) node the
+// control plane cannot reach directly, so the probe is relayed through the
+// node's management API — exactly as metrics scraping is (see
+// ApplicationMetricsService). ssh/local machines (and an explicit
+// HealthCheckHost / HealthCheckURL override) are probed directly.
+func (s *ApplicationHealthService) probe(ctx context.Context, target *domain.ApplicationEnvTarget) (httpStatus, latencyMS int, checkErr error) {
+	// An operator-supplied full URL is expected to be reachable from the
+	// control plane as-is; probe it directly regardless of machine mode.
+	if rawURL := strings.TrimSpace(target.HealthCheckURL); rawURL != "" {
+		u, err := url.Parse(rawURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return 0, 0, errors.New(fmt.Sprintf("%s/%s health check url is invalid", target.Env, target.InstanceName))
+		}
+		return s.probeDirect(ctx, target, rawURL)
+	}
+	if target.Port <= 0 {
+		return 0, 0, errors.New(fmt.Sprintf("%s/%s health check target port is required", target.Env, target.InstanceName))
+	}
+
+	var machine *domain.Machine
+	if target.MachineID > 0 {
+		m, err := s.machines.GetByID(ctx, target.MachineID)
+		if err != nil {
+			return 0, 0, err
+		}
+		machine = m
+	}
+
+	// Agent mode with no explicit host override → relay through the node.
+	if machine != nil && machine.Mode == domain.MachineModeAgent && strings.TrimSpace(target.HealthCheckHost) == "" {
+		return s.probeViaNode(ctx, target, machine)
+	}
+
+	checkURL, err := directHealthCheckURL(target, machine)
+	if err != nil {
+		return 0, 0, err
+	}
+	return s.probeDirect(ctx, target, checkURL)
+}
+
+// probeDirect issues the health request straight from the control plane. Used
+// for ssh/local machines and explicit host/url overrides.
+func (s *ApplicationHealthService) probeDirect(ctx context.Context, target *domain.ApplicationEnvTarget, checkURL string) (httpStatus, latencyMS int, checkErr error) {
 	timeout := time.Duration(target.HealthCheckTimeoutMS) * time.Millisecond
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, target.HealthCheckMethod, checkURL, nil)
 	if err != nil {
-		return nil, err
+		return 0, 0, err
 	}
 	started := time.Now()
 	resp, err := s.client.Do(req)
-	latency := time.Since(started)
-	now := time.Now()
-
-	var httpStatus int
-	var checkErr error
+	latencyMS = int(time.Since(started).Milliseconds())
 	if err != nil {
-		checkErr = err
-	} else {
-		httpStatus = resp.StatusCode
-		_ = resp.Body.Close()
-		if resp.StatusCode != target.HealthCheckExpectedStatus {
-			checkErr = errors.New(fmt.Sprintf("unexpected HTTP status %d, want %d", resp.StatusCode, target.HealthCheckExpectedStatus))
+		return 0, latencyMS, err
+	}
+	httpStatus = resp.StatusCode
+	_ = resp.Body.Close()
+	if httpStatus != target.HealthCheckExpectedStatus {
+		return httpStatus, latencyMS, errors.New(fmt.Sprintf("unexpected HTTP status %d, want %d", httpStatus, target.HealthCheckExpectedStatus))
+	}
+	return httpStatus, latencyMS, nil
+}
+
+// probeViaNode asks the target's agenda-node to probe the app locally and relay
+// the result. A transport error to the node itself (node offline/unreachable)
+// surfaces as checkErr, so an offline node correctly drives its instances
+// unhealthy — the very failure mode that a direct host.docker.internal probe
+// silently masked.
+func (s *ApplicationHealthService) probeViaNode(ctx context.Context, target *domain.ApplicationEnvTarget, machine *domain.Machine) (httpStatus, latencyMS int, checkErr error) {
+	appName := strconv.FormatInt(target.ApplicationID, 10)
+	if s.apps != nil {
+		if app, err := s.apps.GetByID(ctx, target.ApplicationID); err == nil {
+			appName = app.Name
 		}
 	}
-
-	prev, err := s.health.GetByTargetID(ctx, target.ID)
+	res, err := nodeproxy.Probe(
+		ctx, machine.AgentBaseURL, machine.AgentToken,
+		appName, target.InstanceName,
+		target.HealthCheckScheme, target.HealthCheckMethod, target.HealthCheckPath,
+		target.Port, target.HealthCheckTimeoutMS,
+	)
 	if err != nil {
-		return nil, err
+		return 0, 0, err
 	}
-	next := buildHealthResult(target, prev, now, int(latency.Milliseconds()), httpStatus, checkErr)
-	if err := s.health.Upsert(ctx, next); err != nil {
-		return nil, err
+	if res.Error != "" {
+		return res.HTTPStatus, res.LatencyMS, errors.New(res.Error)
 	}
-	return next, nil
+	if res.HTTPStatus != target.HealthCheckExpectedStatus {
+		return res.HTTPStatus, res.LatencyMS, errors.New(fmt.Sprintf("unexpected HTTP status %d, want %d", res.HTTPStatus, target.HealthCheckExpectedStatus))
+	}
+	return res.HTTPStatus, res.LatencyMS, nil
 }
 
 func (s *ApplicationHealthService) CheckDueTargets(ctx context.Context) error {
@@ -140,41 +216,20 @@ func (s *ApplicationHealthService) CheckDueTargets(ctx context.Context) error {
 	return nil
 }
 
-func (s *ApplicationHealthService) resolveHealthCheckURL(ctx context.Context, target *domain.ApplicationEnvTarget) (string, error) {
-	if rawURL := strings.TrimSpace(target.HealthCheckURL); rawURL != "" {
-		u, err := url.Parse(rawURL)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return "", errors.New(fmt.Sprintf("%s/%s health check url is invalid", target.Env, target.InstanceName))
-		}
-		return rawURL, nil
-	}
+// directHealthCheckURL builds the URL for a control-plane-issued probe against
+// an ssh/local machine (or a target with an explicit HealthCheckHost). Agent-
+// mode targets never reach here — they are relayed through the node instead,
+// so there is no host.docker.internal single-machine assumption to make.
+func directHealthCheckURL(target *domain.ApplicationEnvTarget, machine *domain.Machine) (string, error) {
 	if target.Port <= 0 {
 		return "", errors.New(fmt.Sprintf("%s/%s health check target port is required", target.Env, target.InstanceName))
 	}
 	host := strings.TrimSpace(target.HealthCheckHost)
-	var machine *domain.Machine
-	if host == "" && target.MachineID > 0 {
-		m, err := s.machines.GetByID(ctx, target.MachineID)
-		if err != nil {
-			return "", err
-		}
-		machine = m
+	if host == "" && machine != nil {
 		host = strings.TrimSpace(machine.Host)
 	}
 	if host == "" {
 		host = "127.0.0.1"
-		// Agent-mode machines run the deploy target's container via a
-		// separate agenda-node process/container (typically docker-outside-
-		// of-docker), never inside control-plane's own container — so
-		// control-plane's 127.0.0.1 can never reach it. host.docker.internal
-		// reaches whatever the target published on the physical host,
-		// mirroring the same convention already used for
-		// gateway.backend_host (internal/pipeline/builder.go). Requires
-		// control-plane's own container to have
-		// `extra_hosts: host.docker.internal:host-gateway` configured.
-		if machine != nil && machine.Mode == domain.MachineModeAgent {
-			host = "host.docker.internal"
-		}
 	}
 	hostPort := host
 	if _, _, err := net.SplitHostPort(host); err != nil {

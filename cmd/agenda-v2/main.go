@@ -73,7 +73,7 @@ func main() {
 	secretBox := secret.NewBox(cfg.Security.MasterKey)
 
 	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
-	appHealthSvc := service.NewApplicationHealthService(appTargetRepo, appHealthRepo, machineRepo)
+	appHealthSvc := service.NewApplicationHealthService(appRepo, appTargetRepo, appHealthRepo, machineRepo)
 	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
 	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
 	machineSvc := service.NewMachineService(machineRepo, secretBox)

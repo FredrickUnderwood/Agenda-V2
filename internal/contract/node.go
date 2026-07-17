@@ -72,6 +72,29 @@ const (
 // 127.0.0.1:<port> when the "path" query param is omitted.
 const DefaultMetricsPath = "/metrics"
 
+// Query params for GET /v1/probe/:app/:instance — the node-mediated health
+// probe. The control plane never reaches a deployed app's port directly (it
+// may be on a remote agent host); it asks the node to probe locally and relay
+// the result, mirroring how GET /v1/metrics/:app/:instance relays a scrape.
+const (
+	NodeProbeQueryPort      = "port"
+	NodeProbeQueryPath      = "path"
+	NodeProbeQueryScheme    = "scheme"
+	NodeProbeQueryMethod    = "method"
+	NodeProbeQueryTimeoutMS = "timeout_ms"
+)
+
+// NodeProbeResponse is the body of GET /v1/probe/:app/:instance. A 200 from
+// the node means the probe was *attempted*; the upstream app's own result is
+// carried in these fields (HTTPStatus == 0 with Error set when the app could
+// not be reached at all). The control plane applies its own expected-status
+// comparison, so the node never judges healthy/unhealthy itself.
+type NodeProbeResponse struct {
+	HTTPStatus int    `json:"http_status"`
+	LatencyMS  int    `json:"latency_ms"`
+	Error      string `json:"error,omitempty"`
+}
+
 // NodeLogFile is one matched on-disk log file in the response of
 // GET /v1/logs/:app/:instance. Service is the AGENDA_SERVICE_NAME segment of
 // the filename (empty for single-service apps that never set it).

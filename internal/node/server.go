@@ -62,6 +62,7 @@ func (s *Server) registerRoutes() {
 		v1.PUT("/proxy/:instance", s.registerProxy)
 		v1.GET("/logs/:app/:instance", s.getLogs)
 		v1.GET("/metrics/:app/:instance", s.getMetrics)
+		v1.GET("/probe/:app/:instance", s.probe)
 	}
 }
 
@@ -240,4 +241,41 @@ func (s *Server) getMetrics(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, contentType, body)
+}
+
+// probe relays a health check to app/instance's own endpoint, listening on the
+// given local port, and returns the upstream status/latency/error to the
+// control plane. Like getMetrics, app/instance aren't used for routing (port
+// is self-sufficient) — kept for parity and legibility in access logs. The
+// node never decides healthy/unhealthy: a reachable app always yields HTTP 200
+// from this endpoint with the app's real status in the body, so the control
+// plane can apply its own expected-status rule.
+func (s *Server) probe(c *gin.Context) {
+	portStr := c.Query(contract.NodeProbeQueryPort)
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "port must be a valid TCP port"})
+		return
+	}
+	path := c.Query(contract.NodeProbeQueryPath)
+	if path != "" && !strings.HasPrefix(path, "/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path must start with /"})
+		return
+	}
+	scheme := c.Query(contract.NodeProbeQueryScheme)
+	method := c.Query(contract.NodeProbeQueryMethod)
+
+	var timeout time.Duration
+	if v := c.Query(contract.NodeProbeQueryTimeoutMS); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
+			timeout = time.Duration(ms) * time.Millisecond
+		}
+	}
+
+	status, latencyMS, probeErr := probeLocal(c.Request.Context(), s.backendHost, scheme, method, path, port, timeout)
+	resp := contract.NodeProbeResponse{HTTPStatus: status, LatencyMS: latencyMS}
+	if probeErr != nil {
+		resp.Error = probeErr.Error()
+	}
+	c.JSON(http.StatusOK, resp)
 }
