@@ -56,7 +56,7 @@ func (s *ApplicationMetricsService) FetchInstanceMetrics(ctx context.Context, ta
 		return nil, "", errors.New("machine is not in agent mode; metrics scraping requires agenda-node")
 	}
 
-	return nodeproxy.FetchMetrics(ctx, mc.AgentBaseURL, mc.AgentToken, app.Name, target.InstanceName, target.MetricsPort, "")
+	return nodeproxy.FetchMetrics(ctx, mc.AgentBaseURL, mc.AgentToken, app.Name, target.InstanceName, target.MetricsPort, "", "")
 }
 
 // ScrapeTarget is one row of the Prometheus http_sd_configs discovery

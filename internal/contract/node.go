@@ -64,8 +64,9 @@ const AgendaContainerMetricsAddr = ":9464"
 
 // Query params for GET /v1/metrics/:app/:instance.
 const (
-	NodeMetricsQueryPort = "port"
-	NodeMetricsQueryPath = "path"
+	NodeMetricsQueryPort   = "port"
+	NodeMetricsQueryPath   = "path"
+	NodeMetricsQueryScheme = "scheme"
 )
 
 // DefaultMetricsPath is the HTTP path agenda-node fetches from

@@ -105,11 +105,11 @@ func FetchLogs(ctx context.Context, agentBaseURL, agentToken, app, instance, dir
 
 // FetchMetrics asks the node at agentBaseURL for app/instance's current
 // Prometheus exposition-format text, scraped from its local metricsPort.
-// path == "" leaves the node's own default (contract.DefaultMetricsPath).
-// Returns the raw body and the node's own Content-Type verbatim — unlike
-// FetchLogs, there is no JSON envelope to unmarshal: the body must reach
-// Prometheus byte-for-byte.
-func FetchMetrics(ctx context.Context, agentBaseURL, agentToken, app, instance string, metricsPort int, path string) (body []byte, contentType string, err error) {
+// path == "" leaves the node's own default (contract.DefaultMetricsPath);
+// scheme == "" leaves the node's default (http). Returns the raw body and the
+// node's own Content-Type verbatim — unlike FetchLogs, there is no JSON
+// envelope to unmarshal: the body must reach Prometheus byte-for-byte.
+func FetchMetrics(ctx context.Context, agentBaseURL, agentToken, app, instance string, metricsPort int, path, scheme string) (body []byte, contentType string, err error) {
 	base := strings.TrimRight(agentBaseURL, "/")
 	if base == "" {
 		return nil, "", errors.New("agent_base_url is empty; cannot fetch metrics")
@@ -122,6 +122,9 @@ func FetchMetrics(ctx context.Context, agentBaseURL, agentToken, app, instance s
 	q.Set(contract.NodeMetricsQueryPort, strconv.Itoa(metricsPort))
 	if path != "" {
 		q.Set(contract.NodeMetricsQueryPath, path)
+	}
+	if scheme != "" {
+		q.Set(contract.NodeMetricsQueryScheme, scheme)
 	}
 	u.RawQuery = q.Encode()
 

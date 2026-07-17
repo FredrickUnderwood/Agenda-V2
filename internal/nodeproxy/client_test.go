@@ -84,7 +84,7 @@ func TestFetchMetrics_BuildsRequestAndReturnsRawBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	body, contentType, err := FetchMetrics(context.Background(), srv.URL, "secret-token", "myapp", "default", 9464, "")
+	body, contentType, err := FetchMetrics(context.Background(), srv.URL, "secret-token", "myapp", "default", 9464, "", "")
 	if err != nil {
 		t.Fatalf("FetchMetrics: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestFetchMetrics_CustomPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, _, err := FetchMetrics(context.Background(), srv.URL, "tok", "myapp", "default", 9464, "/custom"); err != nil {
+	if _, _, err := FetchMetrics(context.Background(), srv.URL, "tok", "myapp", "default", 9464, "/custom", ""); err != nil {
 		t.Fatalf("FetchMetrics: %v", err)
 	}
 	if !containsAll(gotQuery, "port=9464", "path=%2Fcustom") {
@@ -128,13 +128,13 @@ func TestFetchMetrics_ErrorStatusReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, _, err := FetchMetrics(context.Background(), srv.URL, "tok", "myapp", "default", 9464, ""); err == nil {
+	if _, _, err := FetchMetrics(context.Background(), srv.URL, "tok", "myapp", "default", 9464, "", ""); err == nil {
 		t.Fatal("expected error for 502 response")
 	}
 }
 
 func TestFetchMetrics_EmptyBaseURL(t *testing.T) {
-	if _, _, err := FetchMetrics(context.Background(), "", "tok", "myapp", "default", 9464, ""); err == nil {
+	if _, _, err := FetchMetrics(context.Background(), "", "tok", "myapp", "default", 9464, "", ""); err == nil {
 		t.Fatal("expected error for empty agentBaseURL")
 	}
 }

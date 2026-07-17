@@ -234,8 +234,9 @@ func (s *Server) getMetrics(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "path must start with /"})
 		return
 	}
+	scheme := c.Query(contract.NodeMetricsQueryScheme)
 
-	body, contentType, err := fetchLocalMetrics(c.Request.Context(), s.backendHost, port, path)
+	body, contentType, err := fetchLocalMetrics(c.Request.Context(), s.backendHost, scheme, port, path)
 	if err != nil {
 		c.String(http.StatusBadGateway, "%s", err.Error())
 		return
