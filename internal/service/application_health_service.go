@@ -20,7 +20,7 @@ type ApplicationHealthService struct {
 	apps     *repository.ApplicationRepository
 	targets  *repository.ApplicationTargetRepository
 	health   *repository.ApplicationInstanceHealthRepository
-	machines *repository.MachineRepository
+	machines machineGetter
 	client   *http.Client
 }
 
@@ -28,7 +28,7 @@ func NewApplicationHealthService(
 	apps *repository.ApplicationRepository,
 	targets *repository.ApplicationTargetRepository,
 	health *repository.ApplicationInstanceHealthRepository,
-	machines *repository.MachineRepository,
+	machines machineGetter,
 ) *ApplicationHealthService {
 	return &ApplicationHealthService{
 		apps:     apps,
@@ -114,7 +114,9 @@ func (s *ApplicationHealthService) probe(ctx context.Context, target *domain.App
 
 	var machine *domain.Machine
 	if target.MachineID > 0 {
-		m, err := s.machines.GetByID(ctx, target.MachineID)
+		// Get (not the raw repo) so AgentToken is decrypted — probeViaNode
+		// presents it to the node, exactly as the logs/metrics relays do.
+		m, err := s.machines.Get(ctx, target.MachineID)
 		if err != nil {
 			return 0, 0, err
 		}

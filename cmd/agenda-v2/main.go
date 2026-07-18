@@ -72,12 +72,15 @@ func main() {
 	// Service
 	secretBox := secret.NewBox(cfg.Security.MasterKey)
 
-	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
-	appHealthSvc := service.NewApplicationHealthService(appRepo, appTargetRepo, appHealthRepo, machineRepo)
-	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
-	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
 	machineSvc := service.NewMachineService(machineRepo, secretBox)
 	machineSvc.SetAgentPollInterval(cfg.Deploy.AgentPollInterval.Duration)
+	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
+	// Health probes to agent-mode machines are relayed through the node, which
+	// needs the decrypted agent token — so pass machineSvc (Get decrypts), not
+	// the raw machineRepo, matching the logs/metrics relays.
+	appHealthSvc := service.NewApplicationHealthService(appRepo, appTargetRepo, appHealthRepo, machineSvc)
+	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
+	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
 	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineSvc, cfg.WorkspaceRoot)
 	appMetricsSvc := service.NewApplicationMetricsService(appRepo, appTargetRepo, machineSvc)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
