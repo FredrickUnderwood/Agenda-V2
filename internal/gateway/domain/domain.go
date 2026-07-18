@@ -69,17 +69,23 @@ type Route struct {
 func (Route) TableName() string { return "gateway_route" }
 
 type Backend struct {
-	ID           int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	RouteID      int64     `json:"route_id" gorm:"uniqueIndex:idx_gateway_backend_route_release_target;index:idx_gateway_backend_route_release;not null"`
-	ReleaseID    string    `json:"release_id" gorm:"uniqueIndex:idx_gateway_backend_route_release_target;index:idx_gateway_backend_route_release;size:128;not null"`
-	TargetKey    string    `json:"target_key" gorm:"uniqueIndex:idx_gateway_backend_route_release_target;index;size:128;not null"`
-	InstanceName string    `json:"instance_name" gorm:"size:64;not null;default:''"`
-	URL          string    `json:"url" gorm:"size:512;not null"`
-	Weight       int       `json:"weight" gorm:"not null;default:1"`
-	Enabled      bool      `json:"enabled" gorm:"index:idx_gateway_backend_enabled_healthy;not null;default:true"`
-	Healthy      bool      `json:"healthy" gorm:"index:idx_gateway_backend_enabled_healthy;not null;default:true"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	RouteID      int64  `json:"route_id" gorm:"uniqueIndex:idx_gateway_backend_route_release_target;index:idx_gateway_backend_route_release;not null"`
+	ReleaseID    string `json:"release_id" gorm:"uniqueIndex:idx_gateway_backend_route_release_target;index:idx_gateway_backend_route_release;size:128;not null"`
+	TargetKey    string `json:"target_key" gorm:"uniqueIndex:idx_gateway_backend_route_release_target;index;size:128;not null"`
+	InstanceName string `json:"instance_name" gorm:"size:64;not null;default:''"`
+	URL          string `json:"url" gorm:"size:512;not null"`
+	Weight       int    `json:"weight" gorm:"not null;default:1"`
+	// No `default:true` on these two bools: GORM omits a zero-value field from
+	// INSERT when its schema has a default, letting the DB default apply — so an
+	// explicit Enabled=false / Healthy=false would be silently stored as true,
+	// keeping an unhealthy/disabled backend in the load-balancing pool. The
+	// control plane always sets both explicitly, so the column default is
+	// unnecessary and actively harmful here.
+	Enabled   bool      `json:"enabled" gorm:"index:idx_gateway_backend_enabled_healthy;not null"`
+	Healthy   bool      `json:"healthy" gorm:"index:idx_gateway_backend_enabled_healthy;not null"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (Backend) TableName() string { return "gateway_backend" }
