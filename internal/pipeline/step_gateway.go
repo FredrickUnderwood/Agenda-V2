@@ -80,7 +80,7 @@ func (s *GatewayRouteSyncStep) Execute(ctx context.Context, rc *RunContext) erro
 				Enabled:      &enabled,
 				Healthy:      &healthy,
 			})
-			urls = append(urls, backend.URL)
+			urls = append(urls, fmt.Sprintf("%s[%s healthy=%t]", backend.URL, backend.InstanceName, healthy))
 		}
 		req := contract.UpsertRouteRequest{
 			ApplicationID:      s.ApplicationID,
