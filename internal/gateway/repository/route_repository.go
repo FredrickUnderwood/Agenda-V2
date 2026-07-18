@@ -124,7 +124,13 @@ func (r *RouteRepository) UpsertRoute(
 			backends[i].ReleaseID = route.CurrentReleaseID
 		}
 		if len(backends) > 0 {
-			if err := tx.Create(&backends).Error; err != nil {
+			// Select("*") forces every column into the INSERT. Without it, GORM
+			// omits zero-value fields that carry a `default:` tag (Enabled and
+			// Healthy both default:true), so a backend the control plane marked
+			// Healthy=false would be silently persisted as healthy=true — the DB
+			// default — and keep receiving traffic. Explicitly selecting all
+			// columns makes the false survive.
+			if err := tx.Select("*").Create(&backends).Error; err != nil {
 				alog.L().Error("create route backends failed",
 					zap.Int64("route_id", route.ID),
 					zap.String("release_id", route.CurrentReleaseID),

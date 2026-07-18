@@ -7,13 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gatewayclient"
 	"github.com/FredrickUnderwood/agenda-v2/internal/git"
-	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
@@ -421,20 +418,6 @@ func (b *Builder) backendSpecForTarget(ctx context.Context, t *domain.Applicatio
 	if t.HealthCheckEnabled {
 		healthy = t.Health != nil && t.Health.Status == domain.HealthStatusHealthy
 	}
-	// TEMP DEBUG (health-gating investigation): log exactly what the builder
-	// sees for each sibling so we can tell why an unhealthy instance is being
-	// sent to the gateway as healthy=true.
-	healthStatus := "<nil>"
-	if t.Health != nil {
-		healthStatus = string(t.Health.Status)
-	}
-	logger.L().Info("gateway backend health resolve",
-		zap.Int64("target_id", t.ID),
-		zap.String("instance", instanceName),
-		zap.Bool("hc_enabled", t.HealthCheckEnabled),
-		zap.String("health_status", healthStatus),
-		zap.Bool("computed_healthy", healthy),
-	)
 	url, proxyBase, proxyToken, proxyPort, err := b.resolveBackend(machine, scheme, instanceName, t.Port, backendPath)
 	if err != nil {
 		return GatewayBackendSpec{}, false

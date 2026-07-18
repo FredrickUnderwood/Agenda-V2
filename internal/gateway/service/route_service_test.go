@@ -140,3 +140,53 @@ func TestUpsertRoundTripFromControlPlaneWire(t *testing.T) {
 		t.Error("backend[1] enabled=true, want false — explicit *bool false must survive the round trip")
 	}
 }
+
+// TestUnhealthyBackendExcludedFromSnapshot pins the health-gating contract end
+// to end in current source: an explicit Healthy:false from the control-plane
+// wire must survive normalization AND be dropped from the routing snapshot, so
+// the round-robin pool never targets an instance the control plane marked
+// unhealthy.
+func TestUnhealthyBackendExcludedFromSnapshot(t *testing.T) {
+	sent := contract.UpsertRouteRequest{
+		ApplicationID: 1,
+		ServiceName:   "agenda-example",
+		Env:           "prod",
+		Host:          "agenda-example.local",
+		PathPrefix:    "/",
+		ReleaseID:     "rel-1",
+		Status:        "enabled",
+		Backends: []contract.BackendEntry{
+			{TargetKey: "blue", InstanceName: "blue", URL: "http://n:7200/i/blue", Weight: 1, Enabled: boolPtr(true), Healthy: boolPtr(true)},
+			{TargetKey: "green", InstanceName: "green", URL: "http://n:7200/i/green", Weight: 1, Enabled: boolPtr(true), Healthy: boolPtr(false)},
+		},
+	}
+	raw, err := json.Marshal(sent)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got contract.UpsertRouteRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got.RouteKey = "agenda-example-prod-default"
+
+	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second)
+	route, backends, err := svc.normalizeUpsertRequest(got)
+	if err != nil {
+		t.Fatalf("normalizeUpsertRequest: %v", err)
+	}
+	if backends[0].Healthy != true || backends[1].Healthy != false {
+		t.Fatalf("healthy round-trip wrong: blue=%v green=%v, want true/false", backends[0].Healthy, backends[1].Healthy)
+	}
+
+	route.Backends = backends
+	snapshot := svc.toSnapshot(route)
+	for _, b := range snapshot.Backends {
+		if b.InstanceName == "green" {
+			t.Fatalf("unhealthy backend 'green' leaked into routing snapshot: %+v", snapshot.Backends)
+		}
+	}
+	if len(snapshot.Backends) != 1 || snapshot.Backends[0].InstanceName != "blue" {
+		t.Fatalf("snapshot backends = %+v, want only healthy 'blue'", snapshot.Backends)
+	}
+}
