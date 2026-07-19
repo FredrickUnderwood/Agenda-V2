@@ -76,7 +76,6 @@ NODE_MGMT_PORT=7100
 NODE_PROXY_PORT=7200
 WEB_PORT=8090
 PROMETHEUS_PORT=9090
-GRAFANA_PORT=3000
 EOF
     chmod 600 "$ENV_FILE"
 }
@@ -320,7 +319,7 @@ cmd_up() {
         log "starting prometheus + grafana"
         "${COMPOSE[@]}" --profile observability up -d prometheus grafana
         enable_observability_settings
-        log "Grafana: http://localhost:3000  (anonymous viewer)"
+        log "Grafana: http://localhost:${WEB_PORT:-8090}/grafana/  (via web console, anonymous viewer)"
     fi
 
     print_summary

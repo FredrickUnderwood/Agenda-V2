@@ -7,10 +7,16 @@ app). Independent of how/where the gateway itself is deployed.
 
 ## Bring it up
 
-1. Edit `prometheus.yml`'s target if your gateway isn't reachable at
-   `host.docker.internal:8081` (deploy/quickstart's `GATEWAY_PORT` default —
-   e.g. it's on another machine, or `GATEWAY_PORT`/`GATEWAY_ADDR` is
-   non-default).
+1. The shipped `prometheus.yml` assumes the gateway/control-plane are on the
+   docker host (`host.docker.internal`). For any other layout — another
+   machine, non-default ports — **render it from the template** instead of
+   hand-editing:
+   ```
+   cp .env.example .env      # then edit .env
+   set -a; source .env; envsubst < prometheus.yml.tmpl > prometheus.yml
+   ```
+   (You still need to fill the `agenda-app-metrics` bearer token — the
+   `SCRAPE_TOKEN` in `.env`, which is the `observability.scrape_token` Setting.)
 2. `docker compose -f deploy/observability/docker-compose.yml up -d`
 3. Prometheus: http://localhost:9090 — check **Status → Targets**, the
    `agenda-gateway` job should be `UP`.
@@ -19,17 +25,28 @@ app). Independent of how/where the gateway itself is deployed.
 
 ## Embedding in the agenda-v2 frontend
 
-Grafana runs with `GF_AUTH_ANONYMOUS_ENABLED` + `GF_SECURITY_ALLOW_EMBEDDING`
-so its panels can be iframed directly, e.g.:
+The **quickstart deploy** (`deploy/quickstart`) already wires this up the right
+way: Grafana is served under `/grafana` behind the web console's nginx
+(`web/nginx.conf`) with `GF_SERVER_ROOT_URL`/`GF_SERVER_SERVE_FROM_SUB_PATH`,
+so its port is **never published** and the console embeds panels same-origin at
+`/grafana/d-solo/...`. The Monitoring tab passes the app's service name as the
+dashboard's `service` template variable (`var-service`), so each app sees only
+its own series.
 
+For this **standalone add-on**, Grafana is published at the root (port 3000)
+for direct access. Don't expose that port to the internet — put it behind your
+own reverse proxy / network boundary. To serve it under `/grafana` like the
+quickstart does, set on the grafana service:
 ```
-http://<grafana-host>:3000/d-solo/agenda-gateway-overview/gateway-overview?panelId=1&theme=light&kiosk
+GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+GF_SERVER_SERVE_FROM_SUB_PATH: "true"
 ```
-
+and embed:
+```
+<your-origin>/grafana/d-solo/agenda-gateway-overview/gateway-overview?panelId=1&var-service=<svc>&theme=light&kiosk
+```
 `panelId=1` is the error-rate panel, `panelId=2` is P99 latency (see
-`grafana/dashboards/gateway-overview.json`). Don't expose Grafana's port
-directly to the internet — reverse-proxy it (through the gateway itself, or
-your own ingress) the same way you would any other internal service.
+`grafana/dashboards/gateway-overview.json`).
 
 ## Metrics reference
 
@@ -76,3 +93,15 @@ Setup:
    plane actually listens.
 6. Check Prometheus's **Status → Targets** — enabled instances should appear
    under the `agenda-app-metrics` job as `UP`.
+
+## Roadmap: self-hosting the platform's own components
+
+Today Grafana is reverse-proxied behind the web console's nginx. The longer-term
+direction is to let agenda-gateway itself front the platform's own components
+(Grafana, Prometheus, the node) as ordinary backends — "dogfooding" the gateway.
+The data plane is already most of the way there: a gateway `Backend` resolves to
+a plain `URL` (`internal/gateway/domain/domain.go`), so a **system static route**
+(one not derived from an `ApplicationEnvTarget`, i.e. `ApplicationID=0`, and not
+cleared by `SyncByApplicationEnv`) could point straight at `grafana:3000`. Once
+the console frontend also sits behind the gateway, the whole platform collapses
+to a single public port. Not implemented yet — tracked as a follow-up.

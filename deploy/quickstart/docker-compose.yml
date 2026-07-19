@@ -151,12 +151,17 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # Served under /grafana behind the web console's nginx (web/nginx.conf),
+      # so panels embed same-origin and Grafana's port is never published.
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
-    ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+    # No published port: the web container reaches grafana:3000 over the compose
+    # network and proxies it at /grafana. Nothing external talks to Grafana
+    # directly.
 
 volumes:
   mysql-data:

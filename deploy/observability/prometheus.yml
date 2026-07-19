@@ -1,3 +1,6 @@
+# Default config (single-host: gateway/control-plane on the docker host). For
+# any other layout, don't hand-edit this file — render it from
+# prometheus.yml.tmpl with your own values (see .env.example / README).
 global:
   scrape_interval: 15s
 
