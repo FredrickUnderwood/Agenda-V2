@@ -29,5 +29,8 @@ config/agenda-v2.*.yaml
 deploy/quickstart/.env
 deploy/quickstart/config/
 
+# Local test/usage runbook — contains plaintext test-env credentials, keep local.
+doc/quickstart-usage.md
+
 # Logs
 *.log
