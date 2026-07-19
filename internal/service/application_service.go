@@ -214,6 +214,15 @@ func (s *ApplicationService) GetTargetForEnvInstance(ctx context.Context, appID 
 	if err != nil {
 		return nil, err
 	}
+	// Load each route's selected-backend list (route.Backends is gorm:"-", not
+	// auto-fetched). The deploy pipeline reads this target's GatewayRoutes and,
+	// for backend_mode=selected, resolves backends from route.Backends — without
+	// this attach that list is empty, the route resolves to zero backends, and
+	// gateway_routes_sync is silently skipped, so selected mode never reaches the
+	// gateway. The display path (attachGatewayRoutesToTargets) already does this.
+	if err := s.attachRouteBackends(ctx, routes); err != nil {
+		return nil, err
+	}
 	target.GatewayRoutes = routes
 	return target, nil
 }
