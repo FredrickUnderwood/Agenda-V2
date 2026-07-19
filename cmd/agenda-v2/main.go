@@ -118,7 +118,8 @@ func main() {
 	alertRuleMonitor.Start()
 	defer alertRuleMonitor.Stop()
 
-	machineMonitor := application.NewMachineMonitor(machineSvc, alertSvc, 30*time.Second)
+	proxyResyncSvc := service.NewProxyResyncService(appTargetRepo, appReleaseRepo, machineSvc)
+	machineMonitor := application.NewMachineMonitor(machineSvc, alertSvc, proxyResyncSvc, 30*time.Second)
 	machineMonitor.Start()
 	defer machineMonitor.Stop()
 

@@ -26,6 +26,13 @@ type machineLister interface {
 	ListViews(ctx context.Context) ([]service.MachineView, error)
 }
 
+// proxyResyncer re-registers a recovered node's in-memory reverse-proxy routes
+// (cleared on node restart). Narrow interface so the monitor doesn't depend on
+// the whole service. Optional — nil disables the behavior.
+type proxyResyncer interface {
+	ResyncMachine(ctx context.Context, machineID int64) (int, error)
+}
+
 // MachineMonitor is a ticking background worker that watches agent-mode
 // machines' heartbeat-derived online status and fires an alert (via
 // AlertService.SendToAll, reusing the Feishu/DingTalk/WeCom/Slack/custom
@@ -38,6 +45,7 @@ type machineLister interface {
 type MachineMonitor struct {
 	machines machineLister
 	alerts   *service.AlertService
+	resync   proxyResyncer
 	interval time.Duration
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -49,7 +57,9 @@ type MachineMonitor struct {
 	lastOnline map[int64]bool
 }
 
-func NewMachineMonitor(machines machineLister, alerts *service.AlertService, interval time.Duration) *MachineMonitor {
+// NewMachineMonitor builds the monitor. resync may be nil, in which case a
+// recovered node's proxy routes are not automatically re-registered.
+func NewMachineMonitor(machines machineLister, alerts *service.AlertService, resync proxyResyncer, interval time.Duration) *MachineMonitor {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
@@ -57,6 +67,7 @@ func NewMachineMonitor(machines machineLister, alerts *service.AlertService, int
 	return &MachineMonitor{
 		machines:   machines,
 		alerts:     alerts,
+		resync:     resync,
 		interval:   interval,
 		ctx:        ctx,
 		cancel:     cancel,
@@ -123,6 +134,7 @@ func (m *MachineMonitor) evaluateOnce() {
 			m.alert(ctx, v, false)
 		case !prev && online:
 			m.alert(ctx, v, true)
+			m.resyncProxies(ctx, v.ID)
 		}
 	}
 
@@ -132,6 +144,20 @@ func (m *MachineMonitor) evaluateOnce() {
 		if _, ok := seen[id]; !ok {
 			delete(m.lastOnline, id)
 		}
+	}
+}
+
+// resyncProxies re-registers a just-recovered node's reverse-proxy routes. The
+// node's registry is in-memory and cleared on restart, so without this every
+// instance on a restarted node keeps 502ing until its next deploy. Best-effort:
+// a failure is logged, not retried here — the next recovery edge will try again.
+func (m *MachineMonitor) resyncProxies(ctx context.Context, machineID int64) {
+	if m.resync == nil {
+		return
+	}
+	if _, err := m.resync.ResyncMachine(ctx, machineID); err != nil {
+		logger.L().Warn("machine monitor: proxy resync after recovery failed",
+			zap.Int64("machine_id", machineID), zap.Error(err))
 	}
 }
 

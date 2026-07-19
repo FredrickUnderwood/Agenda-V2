@@ -109,6 +109,21 @@ func (r *ApplicationTargetRepository) ListEnabledByMachinePort(ctx context.Conte
 	return targets, nil
 }
 
+// ListEnabledByMachine returns every enabled target on a machine, across all
+// applications and envs. Used to re-register a recovered node's in-memory proxy
+// routes, which are cleared whenever the node process restarts.
+func (r *ApplicationTargetRepository) ListEnabledByMachine(ctx context.Context, machineID int64) ([]*domain.ApplicationEnvTarget, error) {
+	var targets []*domain.ApplicationEnvTarget
+	if err := r.db.WithContext(ctx).
+		Where("enabled = ? AND machine_id = ?", true, machineID).
+		Find(&targets).Error; err != nil {
+		logger.L().Error("failed to list enabled targets by machine",
+			zap.Int64("machine_id", machineID), zap.Error(err))
+		return nil, err
+	}
+	return targets, nil
+}
+
 func (r *ApplicationTargetRepository) Upsert(ctx context.Context, target *domain.ApplicationEnvTarget) error {
 	var existing domain.ApplicationEnvTarget
 	target.InstanceName = domain.NormalizeInstanceName(target.InstanceName)

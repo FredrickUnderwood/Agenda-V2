@@ -30,6 +30,24 @@ func (f *fakeMachineLister) ListViews(context.Context) ([]service.MachineView, e
 	return f.views, nil
 }
 
+type fakeProxyResyncer struct {
+	mu    sync.Mutex
+	calls []int64
+}
+
+func (f *fakeProxyResyncer) ResyncMachine(_ context.Context, id int64) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, id)
+	return 0, nil
+}
+
+func (f *fakeProxyResyncer) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func agentMachine(id int64, name string, online bool) service.MachineView {
 	hb := time.Now()
 	return service.MachineView{
@@ -40,7 +58,7 @@ func agentMachine(id int64, name string, online bool) service.MachineView {
 
 // newMachineTestMonitor wires a real AlertService against a local webhook so
 // SendToAll is observable, mirroring alert_rule_monitor_test's harness.
-func newMachineTestMonitor(t *testing.T) (*MachineMonitor, *fakeMachineLister, chan capturedWebhook) {
+func newMachineTestMonitor(t *testing.T) (*MachineMonitor, *fakeMachineLister, chan capturedWebhook, *fakeProxyResyncer) {
 	t.Helper()
 	captured := make(chan capturedWebhook, 10)
 	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,8 +75,9 @@ func newMachineTestMonitor(t *testing.T) (*MachineMonitor, *fakeMachineLister, c
 	alertSvc := service.NewAlertService(settings, nil)
 
 	lister := &fakeMachineLister{}
-	mon := NewMachineMonitor(lister, alertSvc, time.Second)
-	return mon, lister, captured
+	resync := &fakeProxyResyncer{}
+	mon := NewMachineMonitor(lister, alertSvc, resync, time.Second)
+	return mon, lister, captured, resync
 }
 
 func expectNoWebhook(t *testing.T, captured chan capturedWebhook) {
@@ -82,7 +101,7 @@ func expectWebhook(t *testing.T, captured chan capturedWebhook) capturedWebhook 
 }
 
 func TestMachineMonitor_FirstObservationDoesNotAlert(t *testing.T) {
-	mon, lister, captured := newMachineTestMonitor(t)
+	mon, lister, captured, _ := newMachineTestMonitor(t)
 	// Startup: an already-offline agent machine must not alert on first tick.
 	lister.set([]service.MachineView{agentMachine(1, "node-a", false)})
 	mon.evaluateOnce()
@@ -90,7 +109,7 @@ func TestMachineMonitor_FirstObservationDoesNotAlert(t *testing.T) {
 }
 
 func TestMachineMonitor_OnlineToOfflineAlertsThenRecovers(t *testing.T) {
-	mon, lister, captured := newMachineTestMonitor(t)
+	mon, lister, captured, resync := newMachineTestMonitor(t)
 
 	// Seed online (no alert on first observation).
 	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
@@ -108,11 +127,15 @@ func TestMachineMonitor_OnlineToOfflineAlertsThenRecovers(t *testing.T) {
 		t.Fatalf("expected title %q, got %q", want, msg.Title)
 	}
 
-	// Staying offline must not re-alert every tick.
+	// Staying offline must not re-alert every tick, nor resync proxies.
 	mon.evaluateOnce()
 	expectNoWebhook(t, captured)
+	if resync.callCount() != 0 {
+		t.Fatalf("expected no proxy resync while offline, got %d", resync.callCount())
+	}
 
-	// offline -> online: an info recovery notice.
+	// offline -> online: an info recovery notice AND a proxy re-registration,
+	// since the node's in-memory proxy routes are cleared on restart.
 	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
 	mon.evaluateOnce()
 	rec := expectWebhook(t, captured)
@@ -122,10 +145,13 @@ func TestMachineMonitor_OnlineToOfflineAlertsThenRecovers(t *testing.T) {
 	if want := "Machine recovered: node-a"; rec.Title != want {
 		t.Fatalf("expected title %q, got %q", want, rec.Title)
 	}
+	if resync.callCount() != 1 || resync.calls[0] != 1 {
+		t.Fatalf("expected proxy resync for machine 1 on recovery, got calls=%v", resync.calls)
+	}
 }
 
 func TestMachineMonitor_IgnoresSSHMachines(t *testing.T) {
-	mon, lister, captured := newMachineTestMonitor(t)
+	mon, lister, captured, _ := newMachineTestMonitor(t)
 	// An SSH machine always reports offline; it must never drive an alert.
 	ssh := service.MachineView{Machine: &domain.Machine{ID: 2, Name: "ssh-box", Mode: domain.MachineModeSSH}, Online: false}
 	lister.set([]service.MachineView{ssh})
@@ -135,7 +161,7 @@ func TestMachineMonitor_IgnoresSSHMachines(t *testing.T) {
 }
 
 func TestMachineMonitor_DeletedMachineStatePruned(t *testing.T) {
-	mon, lister, _ := newMachineTestMonitor(t)
+	mon, lister, _, _ := newMachineTestMonitor(t)
 	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
 	mon.evaluateOnce()
 	if _, ok := mon.lastOnline[1]; !ok {
