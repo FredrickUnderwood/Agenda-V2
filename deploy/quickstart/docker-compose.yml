@@ -72,6 +72,9 @@ services:
     environment:
       GATEWAY_DATABASE_DSN: "agenda:${MYSQL_PASSWORD}@tcp(mysql:3306)/agenda_gateway?charset=utf8mb4&parseTime=True&loc=Local"
       GATEWAY_SERVICE_TOKEN: ${GATEWAY_SERVICE_TOKEN}
+      # Perms granted to GATEWAY_SERVICE_TOKEN. Defaults to read/update/rollback;
+      # add route.invoke to allow data-plane instance pinning (X-Agenda-Instance).
+      GATEWAY_SERVICE_TOKEN_PERMS: ${GATEWAY_SERVICE_TOKEN_PERMS:-route.read,route.update,route.rollback}
       GATEWAY_JWT_SECRET: ${JWT_SECRET}
       GATEWAY_ADDR: ":8080"
     ports:
