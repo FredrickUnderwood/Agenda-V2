@@ -97,7 +97,10 @@ func (s *ProxyResyncService) ResyncMachine(ctx context.Context, machineID int64)
 	}
 
 	if registered > 0 {
-		logger.L().Info("proxy resync: re-registered instances after node recovery",
+		// Debug, not Info: this runs every monitor tick for every online agent
+		// machine, so an Info line here would be constant noise. A genuine
+		// recovery is already visible via the machine's "recovered" alert.
+		logger.L().Debug("proxy resync: (re)registered instances",
 			zap.Int64("machine_id", machineID), zap.Int("count", registered))
 	}
 	return registered, nil

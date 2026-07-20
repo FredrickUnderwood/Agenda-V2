@@ -123,6 +123,18 @@ func (m *MachineMonitor) evaluateOnce() {
 		online := v.Online
 		prev, known := m.lastOnline[v.ID]
 		m.lastOnline[v.ID] = online
+
+		// Re-register proxy routes every tick for any online agent machine, not
+		// just on an observed offline->online edge. The node's proxy registry is
+		// in-memory and cleared on restart, and a fast restart (or a
+		// control-plane restart) may never be observed as an edge at all — so
+		// periodic idempotent re-registration is the reliable self-heal, bounded
+		// by one tick. Deliberately before the first-observation guard so a
+		// freshly-started control plane also re-registers online nodes at once.
+		if online {
+			m.resyncProxies(ctx, v.ID)
+		}
+
 		if !known {
 			// First observation (fresh process or newly-added machine): seed
 			// state without alerting, so a restart doesn't re-blast every
@@ -134,7 +146,6 @@ func (m *MachineMonitor) evaluateOnce() {
 			m.alert(ctx, v, false)
 		case !prev && online:
 			m.alert(ctx, v, true)
-			m.resyncProxies(ctx, v.ID)
 		}
 	}
 
@@ -147,10 +158,11 @@ func (m *MachineMonitor) evaluateOnce() {
 	}
 }
 
-// resyncProxies re-registers a just-recovered node's reverse-proxy routes. The
-// node's registry is in-memory and cleared on restart, so without this every
-// instance on a restarted node keeps 502ing until its next deploy. Best-effort:
-// a failure is logged, not retried here — the next recovery edge will try again.
+// resyncProxies re-registers an online node's reverse-proxy routes. Called
+// every tick for online agent machines: the node's registry is in-memory and
+// cleared on restart, so without periodic re-registration a restarted node
+// keeps 502ing until its next deploy. Idempotent and best-effort — a failure is
+// logged, not retried here, since the next tick tries again.
 func (m *MachineMonitor) resyncProxies(ctx context.Context, machineID int64) {
 	if m.resync == nil {
 		return

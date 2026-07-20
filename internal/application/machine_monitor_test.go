@@ -111,12 +111,16 @@ func TestMachineMonitor_FirstObservationDoesNotAlert(t *testing.T) {
 func TestMachineMonitor_OnlineToOfflineAlertsThenRecovers(t *testing.T) {
 	mon, lister, captured, resync := newMachineTestMonitor(t)
 
-	// Seed online (no alert on first observation).
+	// Seed online: no alert on first observation, but an online agent IS
+	// proxy-resynced every tick.
 	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
 	mon.evaluateOnce()
 	expectNoWebhook(t, captured)
+	if resync.callCount() == 0 {
+		t.Fatal("expected online agent to be proxy-resynced on tick")
+	}
 
-	// online -> offline: a critical offline alert.
+	// online -> offline: a critical offline alert, and no resync while offline.
 	lister.set([]service.MachineView{agentMachine(1, "node-a", false)})
 	mon.evaluateOnce()
 	msg := expectWebhook(t, captured)
@@ -126,16 +130,16 @@ func TestMachineMonitor_OnlineToOfflineAlertsThenRecovers(t *testing.T) {
 	if want := "Machine offline: node-a"; msg.Title != want {
 		t.Fatalf("expected title %q, got %q", want, msg.Title)
 	}
+	offlineCount := resync.callCount()
 
-	// Staying offline must not re-alert every tick, nor resync proxies.
+	// Staying offline must not re-alert nor resync.
 	mon.evaluateOnce()
 	expectNoWebhook(t, captured)
-	if resync.callCount() != 0 {
-		t.Fatalf("expected no proxy resync while offline, got %d", resync.callCount())
+	if resync.callCount() != offlineCount {
+		t.Fatalf("expected no proxy resync while offline, got %d extra", resync.callCount()-offlineCount)
 	}
 
-	// offline -> online: an info recovery notice AND a proxy re-registration,
-	// since the node's in-memory proxy routes are cleared on restart.
+	// offline -> online: an info recovery notice, and proxy resync resumes.
 	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
 	mon.evaluateOnce()
 	rec := expectWebhook(t, captured)
@@ -145,8 +149,25 @@ func TestMachineMonitor_OnlineToOfflineAlertsThenRecovers(t *testing.T) {
 	if want := "Machine recovered: node-a"; rec.Title != want {
 		t.Fatalf("expected title %q, got %q", want, rec.Title)
 	}
-	if resync.callCount() != 1 || resync.calls[0] != 1 {
-		t.Fatalf("expected proxy resync for machine 1 on recovery, got calls=%v", resync.calls)
+	if resync.callCount() <= offlineCount {
+		t.Fatal("expected proxy resync after recovery")
+	}
+	if last := resync.calls[len(resync.calls)-1]; last != 1 {
+		t.Fatalf("expected resync for machine 1, got %d", last)
+	}
+}
+
+func TestMachineMonitor_ResyncsOnlineAgentEachTick(t *testing.T) {
+	mon, lister, _, resync := newMachineTestMonitor(t)
+	// An online agent's in-memory proxy registry can be silently cleared by a
+	// fast restart never observed as offline, so it must be re-registered every
+	// tick, not only on an offline->online edge.
+	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
+	mon.evaluateOnce()
+	mon.evaluateOnce()
+	mon.evaluateOnce()
+	if resync.callCount() != 3 {
+		t.Fatalf("expected a resync each tick for an online agent, got %d", resync.callCount())
 	}
 }
 
