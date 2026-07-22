@@ -52,12 +52,44 @@ and embed:
 
 | Metric | Type | Labels |
 |---|---|---|
-| `gateway_requests_total` | counter | `route_key`, `service_name`, `env`, `backend`, `method`, `status_class` |
-| `gateway_request_duration_seconds` | histogram | `route_key`, `service_name`, `env`, `backend`, `method` |
+| `gateway_requests_total` | counter | `route_key`, `service_name`, `env`, `backend`, `method`, `status_class`, `endpoint` |
+| `gateway_request_duration_seconds` | histogram | `route_key`, `service_name`, `env`, `method`, `endpoint` |
 
 `status_class` is `2xx`/`3xx`/`4xx`/`5xx` (not the raw status code, to keep
 cardinality bounded). `backend` is the target's instance name (e.g.
-`default`, `canary`), not the raw backend URL.
+`default`, `canary`), not the raw backend URL — kept on the counter for
+per-instance traffic/errors, but dropped from the histogram (already multiplied
+by `endpoint` × buckets; per-instance latency percentiles are rarely needed).
+
+`endpoint` is the **normalized app-relative request path**, giving per-API
+metrics. The gateway has no knowledge of an app's route templates, so a raw path
+would explode Prometheus cardinality; it is bounded three ways: ID-looking
+segments (numeric / UUID / long-hex) collapse to `:id`, depth is capped at 6
+(tail → `/*`), and distinct endpoints per gateway process are capped at 200
+(overflow → `/__other__`). The path is the one the backend app sees (route
+prefix stripped when the route strips it), so the same endpoint reads
+identically via internal and external routes.
+
+### Example PromQL (service vs endpoint granularity)
+
+Both levels come from the **same** metrics — aggregate the `endpoint` label away
+for a service view, keep it for a per-endpoint view:
+
+```promql
+# QPS per endpoint
+sum(rate(gateway_requests_total{service_name="myapp"}[1m])) by (endpoint)
+# QPS for the whole service (endpoint aggregated away)
+sum(rate(gateway_requests_total{service_name="myapp"}[1m]))
+# 5xx error rate per endpoint
+sum(rate(gateway_requests_total{service_name="myapp",status_class="5xx"}[5m])) by (endpoint)
+  / sum(rate(gateway_requests_total{service_name="myapp"}[5m])) by (endpoint)
+# P50 / P95 / P99 latency per endpoint
+histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name="myapp"}[5m])) by (le, endpoint))
+```
+
+The provisioned "Gateway Overview" dashboard has by-route panels (ids 1–2) plus
+by-endpoint QPS / error-rate / P50-P95-P99 panels (ids 3–5), filterable via the
+`service` and `endpoint` template variables.
 
 ## Custom app metrics
 
