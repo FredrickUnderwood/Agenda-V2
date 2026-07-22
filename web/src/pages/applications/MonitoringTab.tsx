@@ -9,10 +9,15 @@ const ROUTE_PANELS = [
   { id: 2, title: 'P99 latency by route' },
 ] as const
 
-const ENDPOINT_PANELS = [
+const ENDPOINT_RATE_PANELS = [
   { id: 3, title: 'QPS by endpoint' },
   { id: 4, title: 'Error rate (5xx) by endpoint' },
-  { id: 5, title: 'Latency P50 / P95 / P99 by endpoint' },
+] as const
+
+const ENDPOINT_LATENCY_PANELS = [
+  { id: 5, title: 'P50 latency by endpoint' },
+  { id: 6, title: 'P95 latency by endpoint' },
+  { id: 7, title: 'P99 latency by endpoint' },
 ] as const
 
 function Panel({ baseUrl, id, title, from, serviceName, full }: {
@@ -75,10 +80,15 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
       </div>
 
       <Typography.Title level={5}>By endpoint</Typography.Title>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <Panel baseUrl={baseUrl} id={ENDPOINT_PANELS[0].id} title={ENDPOINT_PANELS[0].title} from={from} serviceName={serviceName} />
-        <Panel baseUrl={baseUrl} id={ENDPOINT_PANELS[1].id} title={ENDPOINT_PANELS[1].title} from={from} serviceName={serviceName} />
-        <Panel baseUrl={baseUrl} id={ENDPOINT_PANELS[2].id} title={ENDPOINT_PANELS[2].title} from={from} serviceName={serviceName} full />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        {ENDPOINT_RATE_PANELS.map((p) => (
+          <Panel key={p.id} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+        {ENDPOINT_LATENCY_PANELS.map((p) => (
+          <Panel key={p.id} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+        ))}
       </div>
     </div>
   )

@@ -11,6 +11,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
+          "min": 0,
+          "max": 1,
           "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
         },
         "overrides": []
@@ -24,7 +26,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(gateway_requests_total{service_name=~\"$service\", status_class=\"5xx\"}[5m])) by (service_name, route_key) / sum(rate(gateway_requests_total{service_name=~\"$service\"}[5m])) by (service_name, route_key)",
+          "expr": "clamp_max(sum(rate(gateway_requests_total{service_name=~\"$service\", status_class=\"5xx\"}[5m])) by (service_name, route_key) / sum(rate(gateway_requests_total{service_name=~\"$service\"}[5m])) by (service_name, route_key), 1)",
           "legendFormat": "{{route_key}}",
           "refId": "A"
         }
@@ -89,6 +91,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
+          "min": 0,
+          "max": 1,
           "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
         },
         "overrides": []
@@ -102,7 +106,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\", status_class=\"5xx\"}[5m])) by (endpoint) / sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (endpoint)",
+          "expr": "clamp_max(sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\", status_class=\"5xx\"}[5m])) by (endpoint) / sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (endpoint), 1)",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -119,7 +123,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
       "id": 5,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -129,23 +133,63 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
-          "legendFormat": "p50 {{endpoint}}",
+          "legendFormat": "{{endpoint}}",
           "refId": "A"
+        }
+      ],
+      "title": "P50 latency by endpoint",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
         },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
-          "legendFormat": "p95 {{endpoint}}",
-          "refId": "B"
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "title": "P95 latency by endpoint",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
         },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 7,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
-          "legendFormat": "p99 {{endpoint}}",
-          "refId": "C"
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
         }
       ],
-      "title": "Latency P50 / P95 / P99 by endpoint",
+      "title": "P99 latency by endpoint",
       "type": "timeseries"
     }
   ],
@@ -179,5 +223,5 @@
   "timezone": "browser",
   "title": "Gateway Overview",
   "uid": "agenda-gateway-overview",
-  "version": 2
+  "version": 3
 }
