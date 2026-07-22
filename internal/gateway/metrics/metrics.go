@@ -14,21 +14,28 @@ import (
 )
 
 var (
+	// endpoint is the normalized app-relative request path (see endpoint.go),
+	// giving per-API-endpoint QPS/error-rate/latency. Service-level views are
+	// recovered by aggregating the label away in PromQL (sum by (service_name)).
 	RequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gateway_requests_total",
 			Help: "Total requests proxied by the gateway.",
 		},
-		[]string{"route_key", "service_name", "env", "backend", "method", "status_class"},
+		[]string{"route_key", "service_name", "env", "backend", "method", "status_class", "endpoint"},
 	)
 
+	// backend (instance) is deliberately NOT a label here: the histogram is
+	// already multiplied by endpoint × buckets, and per-instance latency
+	// percentiles are rarely needed. Per-instance traffic/errors remain visible
+	// via RequestsTotal, which keeps backend.
 	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "gateway_request_duration_seconds",
 			Help:    "Latency of requests proxied by the gateway.",
 			Buckets: prometheus.DefBuckets, // 5ms .. 10s
 		},
-		[]string{"route_key", "service_name", "env", "backend", "method"},
+		[]string{"route_key", "service_name", "env", "method", "endpoint"},
 	)
 )
 

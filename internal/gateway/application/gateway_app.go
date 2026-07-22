@@ -137,11 +137,15 @@ func (a *GatewayApplication) ServeProxy(w http.ResponseWriter, r *http.Request, 
 	start := time.Now()
 	proxy.ServeHTTP(rec, r.WithContext(ctx))
 
+	// endpoint is the app-relative path (prefix stripped when the route strips
+	// it), normalized to bounded cardinality — so the same app endpoint reads
+	// the same whether reached via an external or internal route.
+	endpoint := metrics.NormalizeEndpoint(appRelativePath(route, r.URL.Path))
 	metrics.RequestsTotal.WithLabelValues(
-		route.RouteKey, route.ServiceName, route.Env, backend.InstanceName, r.Method, metrics.StatusClass(rec.Status()),
+		route.RouteKey, route.ServiceName, route.Env, backend.InstanceName, r.Method, metrics.StatusClass(rec.Status()), endpoint,
 	).Inc()
 	metrics.RequestDuration.WithLabelValues(
-		route.RouteKey, route.ServiceName, route.Env, backend.InstanceName, r.Method,
+		route.RouteKey, route.ServiceName, route.Env, r.Method, endpoint,
 	).Observe(time.Since(start).Seconds())
 }
 
@@ -230,6 +234,14 @@ func PathMatches(path, prefix string) bool {
 }
 
 func RoutedPath(targetPath string, route service.RouteSnapshot, originalPath string) string {
+	return singleJoiningSlash(targetPath, appRelativePath(route, originalPath))
+}
+
+// appRelativePath is the request path as the backend app sees it: the incoming
+// path with the route's prefix stripped when the route strips it (otherwise the
+// app receives the prefix too, so it stays). This is the semantic "endpoint"
+// used for per-endpoint metrics, independent of the backend base path.
+func appRelativePath(route service.RouteSnapshot, originalPath string) string {
 	path := originalPath
 	if route.StripPrefix && route.PathPrefix != "/" {
 		path = strings.TrimPrefix(path, route.PathPrefix)
@@ -240,7 +252,7 @@ func RoutedPath(targetPath string, route service.RouteSnapshot, originalPath str
 			path = "/" + path
 		}
 	}
-	return singleJoiningSlash(targetPath, path)
+	return path
 }
 
 func requestHost(host string) string {

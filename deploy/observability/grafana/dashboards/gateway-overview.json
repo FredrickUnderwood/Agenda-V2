@@ -57,6 +57,96 @@
       ],
       "title": "P99 latency by route",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\"}[1m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "title": "QPS by endpoint",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\", status_class=\"5xx\"}[5m])) by (endpoint) / sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Error rate (5xx) by endpoint",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
+          "legendFormat": "p50 {{endpoint}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
+          "legendFormat": "p95 {{endpoint}}",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
+          "legendFormat": "p99 {{endpoint}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Latency P50 / P95 / P99 by endpoint",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -72,6 +162,15 @@
         "query": ".*",
         "current": { "text": ".*", "value": ".*" },
         "options": [{ "text": ".*", "value": ".*", "selected": true }]
+      },
+      {
+        "name": "endpoint",
+        "type": "textbox",
+        "label": "Endpoint",
+        "description": "endpoint (normalized app-relative path) regex filter; defaults to .* (all endpoints).",
+        "query": ".*",
+        "current": { "text": ".*", "value": ".*" },
+        "options": [{ "text": ".*", "value": ".*", "selected": true }]
       }
     ]
   },
@@ -80,5 +179,5 @@
   "timezone": "browser",
   "title": "Gateway Overview",
   "uid": "agenda-gateway-overview",
-  "version": 1
+  "version": 2
 }

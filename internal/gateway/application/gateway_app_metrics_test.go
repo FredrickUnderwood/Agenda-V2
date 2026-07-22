@@ -41,7 +41,7 @@ func TestServeProxy_RecordsSuccessMetrics(t *testing.T) {
 
 	app := newTestApp(t, backend.URL, "metrics-success", "default")
 
-	beforeCount := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-success", "svc-metrics-success", "test", "default", "GET", "2xx"))
+	beforeCount := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-success", "svc-metrics-success", "test", "default", "GET", "2xx", "/orders"))
 	beforeSamples := testutil.CollectAndCount(metrics.RequestDuration)
 
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/orders", nil)
@@ -51,7 +51,7 @@ func TestServeProxy_RecordsSuccessMetrics(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	afterCount := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-success", "svc-metrics-success", "test", "default", "GET", "2xx"))
+	afterCount := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-success", "svc-metrics-success", "test", "default", "GET", "2xx", "/orders"))
 	if afterCount != beforeCount+1 {
 		t.Fatalf("gateway_requests_total{2xx} did not increment: before=%v after=%v", beforeCount, afterCount)
 	}
@@ -64,7 +64,7 @@ func TestServeProxy_RecordsSuccessMetrics(t *testing.T) {
 func TestServeProxy_RecordsErrorMetrics(t *testing.T) {
 	app := newTestApp(t, "http://127.0.0.1:1", "metrics-error", "default")
 
-	before := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-error", "svc-metrics-error", "test", "default", "GET", "5xx"))
+	before := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-error", "svc-metrics-error", "test", "default", "GET", "5xx", "/orders"))
 
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/orders", nil)
 	rec := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestServeProxy_RecordsErrorMetrics(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
 	}
-	after := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-error", "svc-metrics-error", "test", "default", "GET", "5xx"))
+	after := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues("metrics-error", "svc-metrics-error", "test", "default", "GET", "5xx", "/orders"))
 	if after != before+1 {
 		t.Fatalf("gateway_requests_total{5xx} did not increment: before=%v after=%v", before, after)
 	}
@@ -122,6 +122,34 @@ func TestMetricsEndpoint_ExposesRealScrapeFormat(t *testing.T) {
 	}
 	if !strings.Contains(text, `status_class="2xx"`) {
 		t.Errorf("scraped output missing status_class label:\n%s", text)
+	}
+	if !strings.Contains(text, `endpoint="/orders"`) {
+		t.Errorf("scraped output missing endpoint label:\n%s", text)
+	}
+}
+
+// TestServeProxy_EndpointNormalizesIDs confirms distinct ID paths collapse to a
+// single endpoint series (so per-endpoint metrics stay bounded), and that a
+// strip-prefix route labels by the app-relative path.
+func TestServeProxy_EndpointNormalizesIDs(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	app := newTestApp(t, backend.URL, "metrics-endpoint", "default")
+
+	label := []string{"metrics-endpoint", "svc-metrics-endpoint", "test", "default", "GET", "2xx", "/orders/:id"}
+	before := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues(label...))
+
+	for _, id := range []string{"1", "2", "999999"} {
+		req := httptest.NewRequest(http.MethodGet, "http://api.example.com/orders/"+id, nil)
+		app.ServeProxy(httptest.NewRecorder(), req, "")
+	}
+
+	after := testutil.ToFloat64(metrics.RequestsTotal.WithLabelValues(label...))
+	if after != before+3 {
+		t.Fatalf("expected 3 requests folded into endpoint=/orders/:id, before=%v after=%v", before, after)
 	}
 }
 
