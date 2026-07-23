@@ -210,7 +210,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(http_requests_total{agenda_service=~\"$service\"}[1m])) by (route)",
+          "expr": "sum(rate(http_requests_total{app=~\"$service\"}[1m])) by (route)",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -238,7 +238,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "clamp_max(sum(rate(http_requests_total{agenda_service=~\"$service\", status=~\"5..\"}[5m])) by (route) / sum(rate(http_requests_total{agenda_service=~\"$service\"}[5m])) by (route), 1)",
+          "expr": "clamp_max(sum(rate(http_requests_total{app=~\"$service\", status=~\"5..\"}[5m])) by (route) / sum(rate(http_requests_total{app=~\"$service\"}[5m])) by (route), 1)",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -264,7 +264,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{agenda_service=~\"$service\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\"}[5m])) by (le, route))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -290,7 +290,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{agenda_service=~\"$service\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\"}[5m])) by (le, route))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -316,7 +316,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{agenda_service=~\"$service\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\"}[5m])) by (le, route))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
