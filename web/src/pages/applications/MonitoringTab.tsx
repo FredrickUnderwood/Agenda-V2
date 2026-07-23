@@ -20,6 +20,20 @@ const ENDPOINT_LATENCY_PANELS = [
   { id: 7, title: 'P99 latency by endpoint' },
 ] as const
 
+// Panels driven by the app's own sdk/go/metric instrumentation (real
+// registered routes, not the gateway's heuristic path归一). Only populated for
+// apps that add the metric middleware; empty otherwise.
+const APP_ROUTE_RATE_PANELS = [
+  { id: 8, title: 'QPS by app route' },
+  { id: 9, title: 'Error rate (5xx) by app route' },
+] as const
+
+const APP_ROUTE_LATENCY_PANELS = [
+  { id: 10, title: 'P50 latency by app route' },
+  { id: 11, title: 'P95 latency by app route' },
+  { id: 12, title: 'P99 latency by app route' },
+] as const
+
 function Panel({ baseUrl, id, title, from, serviceName, full }: {
   baseUrl: string
   id: number
@@ -87,6 +101,22 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
         {ENDPOINT_LATENCY_PANELS.map((p) => (
+          <Panel key={p.id} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+        ))}
+      </div>
+
+      <Typography.Title level={5}>By app route (SDK)</Typography.Title>
+      <Typography.Paragraph type="secondary" style={{ marginTop: -8 }}>
+        Real registered routes reported by the app's own <code className="agenda-mono">sdk/go/metric</code> middleware.
+        Empty for apps that haven't added it.
+      </Typography.Paragraph>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        {APP_ROUTE_RATE_PANELS.map((p) => (
+          <Panel key={p.id} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+        {APP_ROUTE_LATENCY_PANELS.map((p) => (
           <Panel key={p.id} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
         ))}
       </div>
