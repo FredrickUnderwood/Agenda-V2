@@ -143,6 +143,16 @@ func TestDesiredDomains(t *testing.T) {
 	}
 }
 
+func TestIsManaged(t *testing.T) {
+	m := &Manager{managed: []string{"ai-sbti.top", "api.example.com"}}
+	if !m.isManaged("ai-sbti.top") || !m.isManaged("AI-SBTI.top") {
+		t.Error("expected ai-sbti.top (any case) to be managed")
+	}
+	if m.isManaged("evil.example.org") {
+		t.Error("unmanaged host should be rejected")
+	}
+}
+
 func TestPubliclyCertifiable(t *testing.T) {
 	yes := []string{"ai-sbti.top", "api.example.com", "a.b.c.example.io"}
 	no := []string{"", "*", "*.example.com", "agenda-example.local", "192.168.1.4", "localhost", "internalsvc", "foo.internal", "bar.test"}

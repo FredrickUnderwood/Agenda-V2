@@ -202,6 +202,23 @@ func (m *Manager) newMagic(issuer certmagic.Issuer) (*certmagic.Config, *certmag
 		// time out and stall/retry inside issuance; disabling it falls back to
 		// plain time-based renewal (RenewalWindowRatio) with no downside here.
 		DisableARI: true,
+		// Without OnDemand, a handshake only serves certs already pre-loaded into
+		// the in-memory cache — it will NOT read a managed cert from storage on a
+		// cache miss (certmagic handshake.go: loadDynamically requires OnDemand).
+		// So a cert we issued and persisted to /data would fail to serve after a
+		// restart ("no certificate available"). Enabling OnDemand flips on the
+		// load-from-storage-on-handshake path; DecisionFunc gates it to our
+		// managed domains so it can't be abused to obtain certs for arbitrary
+		// SNI. Background ManageAsync still pre-issues, so on-demand obtaining is
+		// only a fallback for the gap before the next reconcile.
+		OnDemand: &certmagic.OnDemandConfig{
+			DecisionFunc: func(_ context.Context, name string) error {
+				if m.isManaged(name) {
+					return nil
+				}
+				return fmt.Errorf("edgetls: host %q is not a managed gateway domain", name)
+			},
+		},
 	})
 	if issuer != nil {
 		magic.Issuers = []certmagic.Issuer{issuer}
@@ -422,6 +439,21 @@ func publiclyCertifiable(host string) bool {
 		return false // reserved / non-public TLDs
 	}
 	return true
+}
+
+// isManaged reports whether name is in the current desired-domain set (the list
+// last handed to CertMagic). Used by the OnDemand DecisionFunc to gate which
+// SNI values may load-from-storage / be obtained.
+func (m *Manager) isManaged(name string) bool {
+	name = normalizeDomain(name)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, d := range m.managed {
+		if d == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) ctxOrBackground() context.Context {
