@@ -30,12 +30,16 @@ const (
 // keys — DeployLogID/PreviousReleaseID are plain int64 references resolved
 // in the service layer.
 type ApplicationRelease struct {
-	ID                   int64         `json:"id"                     gorm:"primaryKey;autoIncrement"`
-	ApplicationID        int64         `json:"application_id"         gorm:"index:idx_app_release_app_env_instance;not null"`
-	Env                  Environment   `json:"env"                    gorm:"index:idx_app_release_app_env_instance;size:16;not null"`
-	InstanceName         string        `json:"instance_name"          gorm:"index:idx_app_release_app_env_instance;size:64;not null;default:'default'"`
-	MachineID            int64         `json:"machine_id"             gorm:"not null;default:0"`
-	Branch               string        `json:"branch"                 gorm:"size:128;not null;default:'main'"`
+	ID            int64       `json:"id"                     gorm:"primaryKey;autoIncrement"`
+	ApplicationID int64       `json:"application_id"         gorm:"index:idx_app_release_app_env_instance;not null"`
+	Env           Environment `json:"env"                    gorm:"index:idx_app_release_app_env_instance;size:16;not null"`
+	InstanceName  string      `json:"instance_name"          gorm:"index:idx_app_release_app_env_instance;size:64;not null;default:'default'"`
+	MachineID     int64       `json:"machine_id"             gorm:"not null;default:0"`
+	// EnvDeploymentID back-references the env-wide deploy batch that spawned
+	// this release, or 0 for a standalone single-instance release. See
+	// EnvDeployment.
+	EnvDeploymentID      int64         `json:"env_deployment_id"      gorm:"index;not null;default:0"`
+	Branch               string        `json:"branch"                 gorm:"size:128;not null;default:'master'"`
 	CommitSHA            string        `json:"commit_sha"             gorm:"size:64;not null;default:''"`
 	PreviousReleaseID    int64         `json:"previous_release_id"    gorm:"not null;default:0"`
 	PreviousCommitSHA    string        `json:"previous_commit_sha"    gorm:"size:64;not null;default:''"`

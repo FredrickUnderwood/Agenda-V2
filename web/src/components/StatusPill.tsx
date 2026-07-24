@@ -11,6 +11,7 @@ const TONE_BY_STATUS: Record<string, PillTone> = {
   running: 'building',
   draft: 'idle',
   failed: 'failed',
+  partial_failed: 'failed',
   unhealthy: 'failed',
   firing: 'failed',
   offline: 'idle',

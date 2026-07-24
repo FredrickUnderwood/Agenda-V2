@@ -1,5 +1,14 @@
 import { apiClient } from './client'
-import type { ApplicationRelease, CreateReleaseRequest, DeployLog, Environment, ListResponse, ReleaseStatus } from './types'
+import type {
+  ApplicationRelease,
+  CreateEnvDeploymentRequest,
+  CreateReleaseRequest,
+  DeployLog,
+  EnvDeployment,
+  Environment,
+  ListResponse,
+  ReleaseStatus,
+} from './types'
 
 export function listReleases(
   appId: number,
@@ -44,4 +53,20 @@ export function rollbackRelease(id: number, targetReleaseId: number) {
   return apiClient
     .post<ApplicationRelease>(`/releases/${id}/rollback`, { target_release_id: targetReleaseId })
     .then((r) => r.data)
+}
+
+// Env-wide deploy: one batch record fanning out to every enabled instance of
+// (app, env). See EnvDeployment on the backend.
+export function listEnvDeployments(appId: number, filter?: { env?: Environment; limit?: number; offset?: number }) {
+  return apiClient
+    .get<ListResponse<EnvDeployment>>(`/applications/${appId}/env-deployments`, { params: filter })
+    .then((r) => r.data)
+}
+
+export function createEnvDeployment(appId: number, req: CreateEnvDeploymentRequest) {
+  return apiClient.post<EnvDeployment>(`/applications/${appId}/env-deployments`, req).then((r) => r.data)
+}
+
+export function getEnvDeployment(id: number) {
+  return apiClient.get<EnvDeployment>(`/env-deployments/${id}`).then((r) => r.data)
 }

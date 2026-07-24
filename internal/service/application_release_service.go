@@ -70,7 +70,7 @@ func (s *ApplicationReleaseService) Create(ctx context.Context, appID int64, req
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", env, instanceName))
 	}
 
-	rel, err := s.buildDraft(ctx, app, target, req.Branch, req.CommitSHA, req.Operator)
+	rel, err := s.buildDraft(ctx, app, target, req.Branch, req.CommitSHA, req.Operator, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -81,11 +81,28 @@ func (s *ApplicationReleaseService) Create(ctx context.Context, appID int64, req
 	return rel, nil
 }
 
+// CreateBatchChild persists a draft release for one instance of an env-wide
+// deploy batch, tagged with envDeploymentID so the batch can later roll its
+// children up. Unlike Create it takes the already-loaded app/target (the batch
+// orchestrator lists every enabled target once up front) and does not re-check
+// Enabled — the caller only ever passes enabled targets.
+func (s *ApplicationReleaseService) CreateBatchChild(ctx context.Context, app *domain.Application, target *domain.ApplicationEnvTarget, branch, commitSHA, operator string, envDeploymentID int64) (*domain.ApplicationRelease, error) {
+	rel, err := s.buildDraft(ctx, app, target, branch, commitSHA, operator, envDeploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.releases.Create(ctx, rel); err != nil {
+		return nil, err
+	}
+	logStruct("batch child release created", rel)
+	return rel, nil
+}
+
 // buildDraft assembles a new, unpersisted draft release for (app, target),
 // snapshotting the app's current deploy config / env-level config / gateway
 // routes so later inspection of a past release reflects what was configured
 // at the time, not whatever the application looks like today.
-func (s *ApplicationReleaseService) buildDraft(ctx context.Context, app *domain.Application, target *domain.ApplicationEnvTarget, branch, commitSHA, operator string) (*domain.ApplicationRelease, error) {
+func (s *ApplicationReleaseService) buildDraft(ctx context.Context, app *domain.Application, target *domain.ApplicationEnvTarget, branch, commitSHA, operator string, envDeploymentID int64) (*domain.ApplicationRelease, error) {
 	envRow, err := s.envs.GetByApplicationEnv(ctx, app.ID, target.Env)
 	if err != nil {
 		return nil, err
@@ -111,6 +128,7 @@ func (s *ApplicationReleaseService) buildDraft(ctx context.Context, app *domain.
 		Env:                  target.Env,
 		InstanceName:         target.InstanceName,
 		MachineID:            target.MachineID,
+		EnvDeploymentID:      envDeploymentID,
 		Branch:               branch,
 		CommitSHA:            commitSHA,
 		Status:               domain.ReleaseStatusDraft,
@@ -180,7 +198,7 @@ func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad
 	if !envTarget.Enabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", bad.Env, bad.InstanceName))
 	}
-	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, bad.Operator)
+	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, bad.Operator, 0)
 	if err != nil {
 		return nil, err
 	}

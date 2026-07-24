@@ -49,6 +49,7 @@ func Migrate(db *gorm.DB) error {
 		&domain.ApplicationGatewayRouteBackend{},
 		&domain.ApplicationInstanceHealth{},
 		&domain.ApplicationRelease{},
+		&domain.EnvDeployment{},
 		&domain.DeployLog{},
 		&domain.PipelineStep{},
 		&domain.Setting{},

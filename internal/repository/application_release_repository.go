@@ -66,6 +66,20 @@ func (r *ApplicationReleaseRepository) List(ctx context.Context, f ListReleasesF
 	return releases, nil
 }
 
+// ListByEnvDeployment returns the child releases spawned by an env-wide deploy
+// batch, oldest first (deploy order).
+func (r *ApplicationReleaseRepository) ListByEnvDeployment(ctx context.Context, envDeploymentID int64) ([]*domain.ApplicationRelease, error) {
+	var releases []*domain.ApplicationRelease
+	if err := r.db.WithContext(ctx).
+		Where("env_deployment_id = ?", envDeploymentID).
+		Order("id ASC").
+		Find(&releases).Error; err != nil {
+		logger.L().Error("failed to list releases by env deployment", zap.Int64("env_deployment_id", envDeploymentID), zap.Error(err))
+		return nil, err
+	}
+	return releases, nil
+}
+
 // GetLatestVerified returns the most recent verified release for
 // (application_id, env, instance_name) — i.e. "what's currently live".
 // Returns (nil, nil) when there is none yet.

@@ -14,6 +14,7 @@ export type ReleaseStatus =
   | 'failed'
   | 'rolling_back'
   | 'rolled_back'
+export type EnvDeploymentStatus = 'pending' | 'running' | 'success' | 'partial_failed' | 'failed'
 export type SettingType = 'string' | 'int' | 'bool' | 'json'
 export type GatewayBackendMode = 'single' | 'all_enabled' | 'selected'
 export type GatewayInstanceSelectMode = 'disabled' | 'enabled'
@@ -192,6 +193,7 @@ export interface ApplicationRelease {
   env: Environment
   instance_name: string
   machine_id: number
+  env_deployment_id: number
   branch: string
   commit_sha: string
   previous_release_id: number
@@ -208,6 +210,29 @@ export interface CreateReleaseRequest {
   env: Environment
   instance_name?: string
   branch: string
+  commit_sha?: string
+  operator?: string
+}
+
+export interface EnvDeployment {
+  id: number
+  application_id: number
+  env: Environment
+  branch: string
+  commit_sha: string
+  operator: string
+  status: EnvDeploymentStatus
+  total_count: number
+  success_count: number
+  failed_count: number
+  started_at: string
+  finished_at?: string | null
+  releases?: ApplicationRelease[]
+}
+
+export interface CreateEnvDeploymentRequest {
+  env: Environment
+  branch?: string
   commit_sha?: string
   operator?: string
 }

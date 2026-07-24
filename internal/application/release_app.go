@@ -34,6 +34,10 @@ type ReleaseApplication struct {
 	appSvc     *service.ApplicationService
 	releaseSvc *service.ApplicationReleaseService
 	lockSvc    *service.DeployLockService
+	// envDeploySvc owns the env-wide deploy batch record. Nil-safe: a build
+	// wired without it still does single-instance deploys; only DeployEnv and
+	// the batch reconcile hook need it.
+	envDeploySvc *service.EnvDeploymentService
 	// alerts fires an ops notification (and inbox record) when a deploy run
 	// ends in failure. Optional/nil-safe: a build without alerting configured
 	// still deploys; it just doesn't emit the failure notice.
@@ -49,13 +53,93 @@ func NewReleaseApplication(
 	appSvc *service.ApplicationService,
 	releaseSvc *service.ApplicationReleaseService,
 	lockSvc *service.DeployLockService,
+	envDeploySvc *service.EnvDeploymentService,
 	alerts *service.AlertService,
 ) *ReleaseApplication {
 	return &ReleaseApplication{
 		cfg: cfg, builder: builder, runner: runner,
 		logSvc: logSvc, stepSvc: stepSvc, appSvc: appSvc,
-		releaseSvc: releaseSvc, lockSvc: lockSvc, alerts: alerts,
+		releaseSvc: releaseSvc, lockSvc: lockSvc, envDeploySvc: envDeploySvc, alerts: alerts,
 	}
+}
+
+// DeployEnv fans a single "deploy this branch to every enabled instance of
+// (app, env)" intent out to one release+deploy per instance, all recorded
+// under one EnvDeployment batch. Each child acquires its own per-instance lock
+// and runs independently (in parallel), so one instance's lock contention or
+// build failure never blocks the others. Returns the batch immediately with
+// its freshly created child releases; their pipelines finish asynchronously,
+// each reconciling the batch's aggregate status as it terminates.
+func (a *ReleaseApplication) DeployEnv(ctx context.Context, appID int64, env domain.Environment, branch, commitSHA, operator string) (*domain.EnvDeployment, error) {
+	env = domain.DefaultEnvironment(env)
+	if !env.Valid() {
+		return nil, errors.New("invalid env " + string(env))
+	}
+	if strings.TrimSpace(branch) == "" {
+		branch = domain.DefaultBranch
+	}
+	app, err := a.appSvc.Get(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := a.appSvc.ListTargetsByApplication(ctx, appID, env)
+	if err != nil {
+		return nil, err
+	}
+	enabled := make([]*domain.ApplicationEnvTarget, 0, len(targets))
+	for _, t := range targets {
+		if t.Enabled {
+			enabled = append(enabled, t)
+		}
+	}
+	if len(enabled) == 0 {
+		return nil, errors.New("no enabled instances to deploy in " + string(env))
+	}
+
+	batch := &domain.EnvDeployment{
+		ApplicationID: appID,
+		Env:           env,
+		Branch:        branch,
+		CommitSHA:     commitSHA,
+		Operator:      operator,
+		Status:        domain.EnvDeploymentStatusRunning,
+		TotalCount:    len(enabled),
+	}
+	if err := a.envDeploySvc.Create(ctx, batch); err != nil {
+		return nil, err
+	}
+	logger.L().Info("release: env deploy requested",
+		zap.Int64("application_id", appID), zap.String("env", string(env)),
+		zap.String("branch", branch), zap.Int("instances", len(enabled)), zap.Int64("batch_id", batch.ID))
+
+	for _, t := range enabled {
+		rel, err := a.releaseSvc.CreateBatchChild(ctx, app, t, branch, commitSHA, operator, batch.ID)
+		if err != nil {
+			// A child that can't even be drafted never becomes a row Reconcile
+			// can see; Reconcile derives total/counts from the children that do
+			// exist, so simply skipping keeps the aggregate honest.
+			logger.L().Error("release: env deploy child draft failed",
+				zap.Int64("batch_id", batch.ID), zap.String("instance", t.InstanceName), zap.Error(err))
+			continue
+		}
+		if _, err := a.Deploy(ctx, rel.ID); err != nil {
+			// Deploy can fail before anything async starts (lock contention, a
+			// target disabled between listing and here). Flip the child to
+			// failed so Reconcile counts it as a terminal failure rather than
+			// waiting forever on an in-flight release that will never run.
+			logger.L().Error("release: env deploy child start failed",
+				zap.Int64("batch_id", batch.ID), zap.Int64("release_id", rel.ID), zap.Error(err))
+			_ = a.releaseSvc.MarkDeployFailed(ctx, rel.ID)
+		}
+	}
+
+	// Reconcile once synchronously so a batch whose every child failed to start
+	// (or was dropped) already reflects its terminal status on return, without
+	// waiting for an async callback that will never come.
+	if _, err := a.envDeploySvc.Reconcile(ctx, batch.ID); err != nil {
+		logger.L().Error("release: env deploy initial reconcile failed", zap.Int64("batch_id", batch.ID), zap.Error(err))
+	}
+	return a.envDeploySvc.Get(ctx, batch.ID)
 }
 
 // Deploy builds the pipeline for a draft/failed release, persists the
@@ -353,6 +437,18 @@ func (a *ReleaseApplication) syncReleaseStatus(ctx context.Context, releaseID in
 		a.alertDeployFailed(ctx, target, log)
 	default:
 		// paused or (unexpectedly) still running — nothing to sync yet.
+		return
+	}
+
+	// If this release belongs to an env-wide deploy batch, roll its now-updated
+	// status up into the batch aggregate. Runs after the release's own status
+	// was persisted above, so the last child to finish observes every sibling
+	// terminal and writes the batch's final status (see EnvDeploymentService.
+	// Reconcile). Best-effort: the repository layer already logs failures.
+	if a.envDeploySvc != nil {
+		if rel, err := a.releaseSvc.Get(ctx, releaseID); err == nil && rel.EnvDeploymentID > 0 {
+			_, _ = a.envDeploySvc.Reconcile(ctx, rel.EnvDeploymentID)
+		}
 	}
 }
 

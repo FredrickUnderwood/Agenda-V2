@@ -22,6 +22,7 @@ type Server struct {
 	healthSvc       *service.ApplicationHealthService
 	envSvc          *service.ApplicationEnvironmentService
 	releaseSvc      *service.ApplicationReleaseService
+	envDeploySvc    *service.EnvDeploymentService
 	machineSvc      *service.MachineService
 	logSvc          *service.DeployLogService
 	appLogSvc       *service.ApplicationLogService
@@ -42,6 +43,7 @@ func NewServer(
 	healthSvc *service.ApplicationHealthService,
 	envSvc *service.ApplicationEnvironmentService,
 	releaseSvc *service.ApplicationReleaseService,
+	envDeploySvc *service.EnvDeploymentService,
 	machineSvc *service.MachineService,
 	logSvc *service.DeployLogService,
 	appLogSvc *service.ApplicationLogService,
@@ -57,7 +59,7 @@ func NewServer(
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
 		cfg: cfg, engine: gin.New(),
-		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc,
+		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc, envDeploySvc: envDeploySvc,
 		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, appMetricsSvc: appMetricsSvc, settingSvc: settingSvc,
 		alertSvc: alertSvc, alertRuleSvc: alertRuleSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 	}
@@ -131,6 +133,13 @@ func (s *Server) registerRoutes() {
 		apps.PUT("/:appID/environments/:env", s.updateApplicationEnvironment)
 		apps.GET("/:appID/releases", s.listReleases)
 		apps.POST("/:appID/releases", s.createRelease)
+		apps.GET("/:appID/env-deployments", s.listEnvDeployments)
+		apps.POST("/:appID/env-deployments", s.createEnvDeployment)
+	}
+
+	envDeployments := v1.Group("/env-deployments")
+	{
+		envDeployments.GET("/:deploymentID", s.getEnvDeployment)
 	}
 
 	releases := v1.Group("/releases")

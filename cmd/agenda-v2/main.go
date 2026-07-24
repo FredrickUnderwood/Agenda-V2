@@ -61,6 +61,7 @@ func main() {
 	appHealthRepo := repository.NewApplicationInstanceHealthRepository(db)
 	appEnvironmentRepo := repository.NewApplicationEnvironmentRepository(db)
 	appReleaseRepo := repository.NewApplicationReleaseRepository(db)
+	envDeploymentRepo := repository.NewEnvDeploymentRepository(db)
 	machineRepo := repository.NewMachineRepository(db)
 	logRepo := repository.NewDeployLogRepository(db)
 	stepRepo := repository.NewPipelineStepRepository(db)
@@ -81,6 +82,7 @@ func main() {
 	appHealthSvc := service.NewApplicationHealthService(appRepo, appTargetRepo, appHealthRepo, machineSvc)
 	appEnvironmentSvc := service.NewApplicationEnvironmentService(appEnvironmentRepo)
 	appReleaseSvc := service.NewApplicationReleaseService(appReleaseRepo, appRepo, appTargetRepo, appGatewayRouteRepo, appEnvironmentRepo)
+	envDeploymentSvc := service.NewEnvDeploymentService(envDeploymentRepo, appReleaseRepo)
 	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineSvc, cfg.WorkspaceRoot)
 	appMetricsSvc := service.NewApplicationMetricsService(appRepo, appTargetRepo, machineSvc)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
@@ -108,7 +110,7 @@ func main() {
 	runner := pipeline.NewRunner(cfg, logSvc, stepSvc)
 
 	// Application
-	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, alertSvc)
+	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, envDeploymentSvc, alertSvc)
 
 	healthMonitor := application.NewHealthMonitor(appHealthSvc, 15*time.Second)
 	healthMonitor.Start()
@@ -124,7 +126,7 @@ func main() {
 	defer machineMonitor.Stop()
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable
