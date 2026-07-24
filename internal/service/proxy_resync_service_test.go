@@ -28,6 +28,17 @@ func (f fakeTargetLister) ListEnabledByMachine(_ context.Context, machineID int6
 	return f.byMachine[machineID], nil
 }
 
+type fakeAppGetter struct {
+	names map[int64]string
+}
+
+func (f fakeAppGetter) GetByID(_ context.Context, id int64) (*domain.Application, error) {
+	if name, ok := f.names[id]; ok {
+		return &domain.Application{ID: id, Name: name}, nil
+	}
+	return nil, errors.New("app not found")
+}
+
 type fakeVerifiedGetter struct {
 	verified map[string]bool // key: "<app>/<env>/<instance>"
 }
@@ -50,6 +61,7 @@ func newResyncSvc(machine *domain.Machine, targets []*domain.ApplicationEnvTarge
 		targets:  fakeTargetLister{byMachine: map[int64][]*domain.ApplicationEnvTarget{machine.ID: targets}},
 		releases: fakeVerifiedGetter{verified: verified},
 		machines: fakeMachineGetterPR{machines: map[int64]*domain.Machine{machine.ID: machine}},
+		apps:     fakeAppGetter{names: map[int64]string{1: "agenda-example"}},
 		register: func(_ context.Context, base, token, instance string, port int) error {
 			*calls = append(*calls, regCall{base, token, instance, port})
 			return nil
@@ -66,7 +78,7 @@ func TestResyncMachine_RegistersEnabledVerifiedInstances(t *testing.T) {
 	targets := []*domain.ApplicationEnvTarget{
 		{ApplicationID: 1, Env: "prod", InstanceName: "default", Port: 18081, Enabled: true, MachineID: 2},
 		{ApplicationID: 1, Env: "prod", InstanceName: "green", Port: 18082, Enabled: true, MachineID: 2},
-		{ApplicationID: 1, Env: "prod", InstanceName: "nodeploy", Port: 0, Enabled: true, MachineID: 2},   // no port → skip
+		{ApplicationID: 1, Env: "prod", InstanceName: "nodeploy", Port: 0, Enabled: true, MachineID: 2},      // no port → skip
 		{ApplicationID: 1, Env: "prod", InstanceName: "unverified", Port: 9999, Enabled: true, MachineID: 2}, // not verified → skip
 	}
 	verified := map[string]bool{
@@ -91,8 +103,10 @@ func TestResyncMachine_RegistersEnabledVerifiedInstances(t *testing.T) {
 			t.Fatalf("wrong agent target: %+v", c)
 		}
 	}
-	if got["default"] != 18081 || got["green"] != 18082 {
-		t.Fatalf("expected default:18081 green:18082, got %v", got)
+	// Registered under app-scoped proxy keys (nodeproxy.ProxyKey), never bare
+	// instance names — bare names collide across apps sharing a machine.
+	if got["agenda-example-prod-default"] != 18081 || got["agenda-example-prod-green"] != 18082 {
+		t.Fatalf("expected agenda-example-prod-default:18081 agenda-example-prod-green:18082, got %v", got)
 	}
 }
 
@@ -123,8 +137,9 @@ func TestResyncMachine_PerInstanceFailureDoesNotAbort(t *testing.T) {
 		targets:  fakeTargetLister{byMachine: map[int64][]*domain.ApplicationEnvTarget{3: targets}},
 		releases: fakeVerifiedGetter{verified: verified},
 		machines: fakeMachineGetterPR{machines: map[int64]*domain.Machine{3: m}},
-		register: func(_ context.Context, _, _, instance string, _ int) error {
-			if instance == "a" {
+		apps:     fakeAppGetter{names: map[int64]string{1: "agenda-example"}},
+		register: func(_ context.Context, _, _, key string, _ int) error {
+			if key == "agenda-example-prod-a" {
 				return errors.New("boom")
 			}
 			return nil

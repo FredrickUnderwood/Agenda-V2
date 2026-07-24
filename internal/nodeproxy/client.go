@@ -20,10 +20,13 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 )
 
-// RegisterProxyTarget tells the node at agentBaseURL that instanceName currently
+// RegisterProxyTarget tells the node at agentBaseURL that the instance
+// identified by proxyKey (the app-scoped key from ProxyKey — never a bare
+// instance name, which collides across apps sharing a machine) currently
 // listens on the given local port, so the node's reverse proxy forwards
-// /i/<instance> there. Called before syncing a gateway route in agent mode.
-func RegisterProxyTarget(ctx context.Context, agentBaseURL, agentToken, instanceName string, port int) error {
+// /i/<proxyKey> there. Called before syncing a gateway route in agent mode,
+// and by the proxy resync loop.
+func RegisterProxyTarget(ctx context.Context, agentBaseURL, agentToken, proxyKey string, port int) error {
 	base := strings.TrimRight(agentBaseURL, "/")
 	if base == "" {
 		return errors.New("agent_base_url is empty; cannot register proxy target")
@@ -32,7 +35,7 @@ func RegisterProxyTarget(ctx context.Context, agentBaseURL, agentToken, instance
 	if err != nil {
 		return err
 	}
-	endpoint := base + "/v1/proxy/" + instanceName
+	endpoint := base + "/v1/proxy/" + proxyKey
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return err

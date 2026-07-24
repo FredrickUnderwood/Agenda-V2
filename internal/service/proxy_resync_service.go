@@ -22,6 +22,12 @@ type verifiedReleaseGetter interface {
 	GetLatestVerified(ctx context.Context, appID int64, env domain.Environment, instanceName string) (*domain.ApplicationRelease, error)
 }
 
+// appNameGetter resolves an application's name — needed to build the
+// app-scoped proxy key (nodeproxy.ProxyKey) a target registers under.
+type appNameGetter interface {
+	GetByID(ctx context.Context, id int64) (*domain.Application, error)
+}
+
 // ProxyResyncService re-registers a machine's agenda-node reverse-proxy routes
 // (instance name → current local port).
 //
@@ -34,6 +40,7 @@ type ProxyResyncService struct {
 	targets  proxyTargetLister
 	releases verifiedReleaseGetter
 	machines machineGetter
+	apps     appNameGetter
 	// register is nodeproxy.RegisterProxyTarget in production; overridable in
 	// tests so the resync logic can be verified without a live node.
 	register func(ctx context.Context, agentBaseURL, agentToken, instanceName string, port int) error
@@ -43,11 +50,13 @@ func NewProxyResyncService(
 	targets *repository.ApplicationTargetRepository,
 	releases *repository.ApplicationReleaseRepository,
 	machines machineGetter,
+	apps *repository.ApplicationRepository,
 ) *ProxyResyncService {
 	return &ProxyResyncService{
 		targets:  targets,
 		releases: releases,
 		machines: machines,
+		apps:     apps,
 		register: nodeproxy.RegisterProxyTarget,
 	}
 }
@@ -78,6 +87,8 @@ func (s *ProxyResyncService) ResyncMachine(ctx context.Context, machineID int64)
 	}
 
 	registered := 0
+	// Per-call app-name cache: targets on one machine cluster around few apps.
+	appNames := make(map[int64]string)
 	for _, t := range targets {
 		if t.Port <= 0 {
 			continue
@@ -86,10 +97,27 @@ func (s *ProxyResyncService) ResyncMachine(ctx context.Context, machineID int64)
 		if err != nil || rel == nil {
 			continue
 		}
+		appName, ok := appNames[t.ApplicationID]
+		if !ok {
+			app, err := s.apps.GetByID(ctx, t.ApplicationID)
+			if err != nil || app == nil {
+				// Stale target referencing a deleted app (no-FK schema); skip it
+				// rather than registering under a wrong/empty key.
+				logger.L().Warn("proxy resync: cannot resolve application name; skipping target",
+					zap.Int64("machine_id", machineID), zap.Int64("application_id", t.ApplicationID),
+					zap.String("instance", t.InstanceName), zap.Error(err))
+				continue
+			}
+			appName = app.Name
+			appNames[t.ApplicationID] = appName
+		}
 		instance := domain.NormalizeInstanceName(t.InstanceName)
-		if err := s.register(ctx, mc.AgentBaseURL, mc.AgentToken, instance, t.Port); err != nil {
+		// Register under the app-scoped key — a bare instance name collides
+		// across applications sharing this machine (see nodeproxy.ProxyKey).
+		key := nodeproxy.ProxyKey(appName, string(t.Env), instance)
+		if err := s.register(ctx, mc.AgentBaseURL, mc.AgentToken, key, t.Port); err != nil {
 			logger.L().Warn("proxy resync: failed to register instance",
-				zap.Int64("machine_id", machineID), zap.String("instance", instance),
+				zap.Int64("machine_id", machineID), zap.String("proxy_key", key),
 				zap.Int("port", t.Port), zap.Error(err))
 			continue
 		}

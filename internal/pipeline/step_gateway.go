@@ -39,10 +39,17 @@ type GatewayBackendSpec struct {
 	Weight       int
 	Healthy      bool
 
+	// ProxyKey is the app-scoped registry key (nodeproxy.ProxyKey) this backend
+	// registers under on its node — also the /i/<key> segment of URL. Distinct
+	// from InstanceName, which stays the bare name for the gateway's
+	// instance-pinning (X-Agenda-Instance) semantics.
+	ProxyKey string
+
 	// Proxy* are set only for agent-mode backends. When ProxyAgentBaseURL is
 	// non-empty the step first registers ProxyPort with the node's reverse proxy
-	// (so URL, which points at the node's stable /i/<instance> path, resolves to
-	// the instance's current local port) before syncing the route to the gateway.
+	// under ProxyKey (so URL, which points at the node's stable /i/<key> path,
+	// resolves to the instance's current local port) before syncing the route
+	// to the gateway.
 	ProxyAgentBaseURL string
 	ProxyAgentToken   string
 	ProxyPort         int
@@ -66,8 +73,8 @@ func (s *GatewayRouteSyncStep) Execute(ctx context.Context, rc *RunContext) erro
 			// stable proxy URL. A registration failure fails the step (same
 			// all-or-nothing granularity as the route upsert itself).
 			if backend.ProxyAgentBaseURL != "" {
-				if err := nodeproxy.RegisterProxyTarget(ctx, backend.ProxyAgentBaseURL, backend.ProxyAgentToken, backend.InstanceName, backend.ProxyPort); err != nil {
-					return fmt.Errorf("register proxy target for instance %q: %w", backend.InstanceName, err)
+				if err := nodeproxy.RegisterProxyTarget(ctx, backend.ProxyAgentBaseURL, backend.ProxyAgentToken, backend.ProxyKey, backend.ProxyPort); err != nil {
+					return fmt.Errorf("register proxy target %q (instance %q): %w", backend.ProxyKey, backend.InstanceName, err)
 				}
 			}
 			enabled := route.Enabled

@@ -11,6 +11,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gatewayclient"
 	"github.com/FredrickUnderwood/agenda-v2/internal/git"
+	"github.com/FredrickUnderwood/agenda-v2/internal/nodeproxy"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
@@ -418,7 +419,11 @@ func (b *Builder) backendSpecForTarget(ctx context.Context, t *domain.Applicatio
 	if t.HealthCheckEnabled {
 		healthy = t.Health != nil && t.Health.Status == domain.HealthStatusHealthy
 	}
-	url, proxyBase, proxyToken, proxyPort, err := b.resolveBackend(machine, scheme, instanceName, t.Port, backendPath)
+	// App-scoped proxy key: a bare instance name ("default") collides across
+	// applications sharing a node (the registry is a flat map), silently
+	// routing one app's host to another app's container. See nodeproxy.ProxyKey.
+	proxyKey := nodeproxy.ProxyKey(appName, string(t.Env), instanceName)
+	url, proxyBase, proxyToken, proxyPort, err := b.resolveBackend(machine, scheme, proxyKey, t.Port, backendPath)
 	if err != nil {
 		return GatewayBackendSpec{}, false
 	}
@@ -428,6 +433,7 @@ func (b *Builder) backendSpecForTarget(ctx context.Context, t *domain.Applicatio
 		URL:               url,
 		Weight:            weight,
 		Healthy:           healthy,
+		ProxyKey:          proxyKey,
 		ProxyAgentBaseURL: proxyBase,
 		ProxyAgentToken:   proxyToken,
 		ProxyPort:         proxyPort,
@@ -446,22 +452,23 @@ func (b *Builder) resolveBackendHost(machine *config.MachineConfig) string {
 
 // resolveBackend returns the gateway-facing backend URL for an instance and, in
 // agent mode, the proxy-registration fields the sync step needs. In agent mode
-// the URL points at the node's stable proxy path (proxyBaseURL + /i/<instance>),
-// hiding the drifting real port from the gateway; the real port is instead
-// registered with the node. In ssh/local mode the URL is the direct host:port
-// and the proxy fields are empty.
+// the URL points at the node's stable proxy path (proxyBaseURL + /i/<proxyKey>,
+// the app-scoped key from nodeproxy.ProxyKey), hiding the drifting real port
+// from the gateway; the real port is instead registered with the node under
+// the same key. In ssh/local mode the URL is the direct host:port and the
+// proxy fields are empty.
 //
 // An agent machine with an empty AgentProxyBaseURL is a misconfiguration and
 // returns an error rather than silently falling back to host.docker.internal —
 // that fallback is a control-plane-host concept and would route gateway traffic
 // to the wrong machine (the same class of single-machine bug fixed in the
 // health monitor). host.docker.internal is only ever valid for ssh/local.
-func (b *Builder) resolveBackend(machine *config.MachineConfig, scheme, instanceName string, port int, backendPath string) (url, proxyBaseURL, proxyToken string, proxyPort int, err error) {
+func (b *Builder) resolveBackend(machine *config.MachineConfig, scheme, proxyKey string, port int, backendPath string) (url, proxyBaseURL, proxyToken string, proxyPort int, err error) {
 	if machine != nil && machine.IsAgent() {
 		if machine.AgentProxyBaseURL == "" {
 			return "", "", "", 0, errors.New("agent-mode machine has no agent_proxy_base_url; cannot resolve gateway backend")
 		}
-		proxyURL := strings.TrimRight(machine.AgentProxyBaseURL, "/") + "/i/" + instanceName + backendPath
+		proxyURL := strings.TrimRight(machine.AgentProxyBaseURL, "/") + "/i/" + proxyKey + backendPath
 		return proxyURL, machine.AgentBaseURL, machine.AgentToken, port, nil
 	}
 	host := b.resolveBackendHost(machine)
