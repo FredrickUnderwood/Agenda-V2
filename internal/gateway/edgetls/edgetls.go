@@ -37,7 +37,6 @@ import (
 	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/alidns"
-	"github.com/mholt/acmez/v3"
 	"github.com/mholt/acmez/v3/acme"
 	"go.uber.org/zap"
 )
@@ -202,6 +201,11 @@ func (m *Manager) newMagic(issuer certmagic.Issuer) (*certmagic.Config, *certmag
 		// time out and stall/retry inside issuance; disabling it falls back to
 		// plain time-based renewal (RenewalWindowRatio) with no downside here.
 		DisableARI: true,
+		// OCSP stapling fetches from the CA's OCSP responder (for ZeroSSL/Sectigo:
+		// ocsp.sectigo.com), also unreachable from mainland Aliyun nodes — it just
+		// times out and logs a warning per cert. Stapling is optional (clients
+		// fall back to their own revocation checks), so disable it here too.
+		OCSP: certmagic.OCSPConfig{DisableStapling: true},
 		// Without OnDemand, a handshake only serves certs already pre-loaded into
 		// the in-memory cache — it will NOT read a managed cert from storage on a
 		// cache miss (certmagic handshake.go: loadDynamically requires OnDemand).
@@ -235,7 +239,13 @@ func (m *Manager) HTTPSAddr() string { return m.opts.HTTPSAddr }
 func (m *Manager) TLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
-		NextProtos: []string{acmez.ACMETLS1Protocol},
+		// Advertise the normal HTTPS ALPN protocols. We must NOT set this to only
+		// acmez.ACMETLS1Protocol ("acme-tls/1"): that is exclusively for the
+		// TLS-ALPN-01 challenge (which we disable — we solve via DNS-01), and a
+		// server offering only it fails ALPN negotiation with every real client
+		// (curl/browsers offer h2,http/1.1) → "no application protocol", i.e. a
+		// broken handshake even though the certificate is valid and loaded.
+		NextProtos: []string{"h2", "http/1.1"},
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			m.mu.RLock()
 			magic := m.magic
