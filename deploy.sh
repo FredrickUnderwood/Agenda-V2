@@ -72,6 +72,11 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=$(rand_hex 12)
 CONTROL_PLANE_PORT=8080
 GATEWAY_PORT=8081
+# Edge TLS (embedded Caddy). Set GATEWAY_TLS_ENABLED=true to make the gateway
+# terminate TLS on :443 and auto-issue certs via ACME DNS-01; then fill the
+# gateway.tls.* keys in the Settings UI. See doc/gateway-edge-tls.md.
+GATEWAY_TLS_ENABLED=false
+GATEWAY_TLS_PORT=8443
 NODE_MGMT_PORT=7100
 NODE_PROXY_PORT=7200
 WEB_PORT=8090

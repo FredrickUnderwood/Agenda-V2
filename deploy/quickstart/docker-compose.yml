@@ -77,8 +77,23 @@ services:
       GATEWAY_SERVICE_TOKEN_PERMS: ${GATEWAY_SERVICE_TOKEN_PERMS:-route.read,route.update,route.rollback}
       GATEWAY_JWT_SECRET: ${JWT_SECRET}
       GATEWAY_ADDR: ":8080"
+      # Edge TLS (embedded Caddy): terminate TLS on :443 and auto-issue certs via
+      # ACME DNS-01, replacing a standalone agenda-caddy. OFF by default so the
+      # quickstart boots without cert config. To turn on, set GATEWAY_TLS_ENABLED=true
+      # in .env, then fill the gateway.tls.* keys in the Settings UI (the ACME/DNS
+      # credentials are pushed from the control plane, never set as env here).
+      # See doc/gateway-edge-tls.md.
+      GATEWAY_TLS_ENABLED: ${GATEWAY_TLS_ENABLED:-false}
+      GATEWAY_TLS_ADDR: ":443"
+      GATEWAY_TLS_STORAGE_PATH: "/data"
     ports:
       - "${GATEWAY_PORT:-8081}:8080"
+      # Only meaningful when GATEWAY_TLS_ENABLED=true; harmless (nothing listens) otherwise.
+      - "${GATEWAY_TLS_PORT:-8443}:443"
+    volumes:
+      # Durable ACME account + issued certs. Never delete casually — losing it can
+      # trip CA rate limits on re-issue (mirrors agenda-caddy's caddy_data volume).
+      - gateway-tls-data:/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/-/health"]
       interval: 5s
@@ -165,5 +180,6 @@ services:
 
 volumes:
   mysql-data:
+  gateway-tls-data:
   prometheus-data:
   grafana-data:
