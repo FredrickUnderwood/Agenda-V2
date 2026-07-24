@@ -63,14 +63,16 @@ func NewReleaseApplication(
 	}
 }
 
-// DeployEnv fans a single "deploy this branch to every enabled instance of
-// (app, env)" intent out to one release+deploy per instance, all recorded
-// under one EnvDeployment batch. Each child acquires its own per-instance lock
-// and runs independently (in parallel), so one instance's lock contention or
-// build failure never blocks the others. Returns the batch immediately with
+// DeployEnv fans a single "deploy this branch to (app, env)" intent out to one
+// release+deploy per instance, all recorded under one EnvDeployment batch. When
+// instanceName is empty the batch targets every enabled instance of the env;
+// when set it targets just that one instance (a batch of one) — the single
+// "Deploy" entry point covers both. Each child acquires its own per-instance
+// lock and runs independently (in parallel), so one instance's lock contention
+// or build failure never blocks the others. Returns the batch immediately with
 // its freshly created child releases; their pipelines finish asynchronously,
 // each reconciling the batch's aggregate status as it terminates.
-func (a *ReleaseApplication) DeployEnv(ctx context.Context, appID int64, env domain.Environment, branch, commitSHA, operator string) (*domain.EnvDeployment, error) {
+func (a *ReleaseApplication) DeployEnv(ctx context.Context, appID int64, env domain.Environment, instanceName, branch, commitSHA, operator string) (*domain.EnvDeployment, error) {
 	env = domain.DefaultEnvironment(env)
 	if !env.Valid() {
 		return nil, errors.New("invalid env " + string(env))
@@ -86,13 +88,26 @@ func (a *ReleaseApplication) DeployEnv(ctx context.Context, appID int64, env dom
 	if err != nil {
 		return nil, err
 	}
+	// An empty instanceName means "every enabled instance of the env"; a
+	// specific one narrows the batch to that single instance.
+	wantInstance := strings.TrimSpace(instanceName)
+	if wantInstance != "" {
+		wantInstance = domain.NormalizeInstanceName(wantInstance)
+	}
 	enabled := make([]*domain.ApplicationEnvTarget, 0, len(targets))
 	for _, t := range targets {
-		if t.Enabled {
-			enabled = append(enabled, t)
+		if !t.Enabled {
+			continue
 		}
+		if wantInstance != "" && t.InstanceName != wantInstance {
+			continue
+		}
+		enabled = append(enabled, t)
 	}
 	if len(enabled) == 0 {
+		if wantInstance != "" {
+			return nil, errors.New("instance " + wantInstance + " is not an enabled instance of " + string(env))
+		}
 		return nil, errors.New("no enabled instances to deploy in " + string(env))
 	}
 

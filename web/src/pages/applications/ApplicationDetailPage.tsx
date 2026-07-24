@@ -71,7 +71,7 @@ export function ApplicationDetailPage() {
         items={[
           { key: 'instances', label: 'Instances', children: <InstancesTab appId={id} /> },
           { key: 'routes', label: 'Routes', children: <RoutesTab appId={id} /> },
-          { key: 'releases', label: 'Releases', children: <ReleasesTab appId={id} /> },
+          { key: 'releases', label: 'Deployments', children: <ReleasesTab appId={id} /> },
           { key: 'monitoring', label: 'Monitoring', children: <MonitoringTab serviceName={app.name} /> },
           { key: 'overview', label: 'Settings', children: <OverviewTab app={app} /> },
         ]}

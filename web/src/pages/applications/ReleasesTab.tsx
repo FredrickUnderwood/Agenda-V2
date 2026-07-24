@@ -1,16 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Form, Input, Modal, Select, Table, Tag } from 'antd'
-import { PlusOutlined, RocketOutlined } from '@ant-design/icons'
+import { RocketOutlined } from '@ant-design/icons'
 import * as api from '@/api/releases'
 import { listApplicationInstances } from '@/api/applications'
-import type {
-  ApplicationRelease,
-  CreateEnvDeploymentRequest,
-  CreateReleaseRequest,
-  Environment,
-  EnvDeployment,
-} from '@/api/types'
+import type { ApplicationRelease, CreateEnvDeploymentRequest, Environment, EnvDeployment } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
 import { RefreshButton } from '@/components/RefreshButton'
 import { errorMessage } from '@/utils/errorMessage'
@@ -23,19 +17,21 @@ const ENV_OPTIONS: { value: Environment; label: string }[] = [
   { value: 'test', label: 'Test' },
 ]
 
+// The Deploy form: an empty instance means "all enabled instances of the env".
+interface DeployFormValues extends CreateEnvDeploymentRequest {
+  instance_name?: string
+}
+
 export function ReleasesTab({ appId }: { appId: number }) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const [modalOpen, setModalOpen] = useState(false)
-  const [envModalOpen, setEnvModalOpen] = useState(false)
+  const [deployOpen, setDeployOpen] = useState(false)
   const [openReleaseId, setOpenReleaseId] = useState<number | null>(null)
   const [openDeploymentId, setOpenDeploymentId] = useState<number | null>(null)
-  const [form] = Form.useForm<CreateReleaseRequest>()
-  const [envForm] = Form.useForm<CreateEnvDeploymentRequest>()
+  const [form] = Form.useForm<DeployFormValues>()
 
-  // The New-release form's instance dropdown is scoped to whichever env is
-  // currently selected in the form, so you only ever pick a real instance.
-  const releaseEnv = Form.useWatch('env', form) as Environment | undefined
+  // The instance dropdown is scoped to whichever env is selected in the form.
+  const deployEnv = Form.useWatch('env', form) as Environment | undefined
 
   const { data, isLoading } = useQuery({
     queryKey: ['releases', 'byApp', appId],
@@ -51,29 +47,21 @@ export function ReleasesTab({ appId }: { appId: number }) {
   })
 
   const instanceOptions = (instances?.data ?? [])
-    .filter((t) => (releaseEnv ? t.env === releaseEnv : true) && t.enabled)
+    .filter((t) => (deployEnv ? t.env === deployEnv : true) && t.enabled)
     .map((t) => ({ value: t.instance_name, label: t.instance_name }))
 
-  const createMutation = useMutation({
-    mutationFn: (req: CreateReleaseRequest) => api.createRelease(appId, req),
-    onSuccess: (rel) => {
-      message.success('Release created as a draft.')
-      queryClient.invalidateQueries({ queryKey: ['releases', 'byApp', appId] })
-      setModalOpen(false)
-      form.resetFields()
-      setOpenReleaseId(rel.id)
-    },
-    onError: (err: unknown) => message.error(errorMessage(err)),
-  })
-
-  const envDeployMutation = useMutation({
+  const deployMutation = useMutation({
     mutationFn: (req: CreateEnvDeploymentRequest) => api.createEnvDeployment(appId, req),
     onSuccess: (batch) => {
-      message.success(`Deploying ${batch.total_count} instance(s) in ${batch.env}.`)
+      message.success(
+        batch.total_count === 1
+          ? `Deploying ${batch.releases?.[0]?.instance_name ?? '1 instance'} in ${batch.env}.`
+          : `Deploying ${batch.total_count} instances in ${batch.env}.`,
+      )
       queryClient.invalidateQueries({ queryKey: ['env-deployments', 'byApp', appId] })
       queryClient.invalidateQueries({ queryKey: ['releases', 'byApp', appId] })
-      setEnvModalOpen(false)
-      envForm.resetFields()
+      setDeployOpen(false)
+      form.resetFields()
       setOpenDeploymentId(batch.id)
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
@@ -89,17 +77,14 @@ export function ReleasesTab({ appId }: { appId: number }) {
             ['applications', appId, 'instances'],
           ]}
         />
-        <Button icon={<RocketOutlined />} onClick={() => setEnvModalOpen(true)}>
-          Deploy environment
-        </Button>
-        <Button icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          New release
+        <Button type="primary" icon={<RocketOutlined />} onClick={() => setDeployOpen(true)}>
+          Deploy
         </Button>
       </div>
 
       <Table<EnvDeployment>
         rowKey="id"
-        title={() => 'Environment deployments'}
+        title={() => 'Deployments'}
         dataSource={envDeployments?.data ?? []}
         pagination={false}
         style={{ marginBottom: 24 }}
@@ -119,12 +104,12 @@ export function ReleasesTab({ appId }: { appId: number }) {
           { title: 'Status', dataIndex: 'status', render: (v) => <StatusPill status={v} /> },
           { title: 'Started', dataIndex: 'started_at', render: (v: string) => new Date(v).toLocaleString() },
         ]}
-        locale={{ emptyText: 'No environment-wide deploys yet.' }}
+        locale={{ emptyText: 'No deployments yet — click Deploy to roll out a branch.' }}
       />
 
       <Table<ApplicationRelease>
         rowKey="id"
-        title={() => 'Releases'}
+        title={() => 'Deployment Detail'}
         loading={isLoading}
         dataSource={data?.data ?? []}
         pagination={false}
@@ -139,7 +124,7 @@ export function ReleasesTab({ appId }: { appId: number }) {
             render: (v: string) => <span className="agenda-mono">{v ? v.slice(0, 10) : '—'}</span>,
           },
           {
-            title: 'Batch',
+            title: 'Deployment',
             dataIndex: 'env_deployment_id',
             render: (v: number) =>
               v > 0 ? (
@@ -158,62 +143,39 @@ export function ReleasesTab({ appId }: { appId: number }) {
           { title: 'Status', dataIndex: 'status', render: (v) => <StatusPill status={v} /> },
           { title: 'Created', dataIndex: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
         ]}
-        locale={{ emptyText: 'No releases yet — create one to deploy a branch.' }}
+        locale={{ emptyText: 'No deployment detail yet.' }}
       />
 
       <Modal
-        title="New release"
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        title="Deploy"
+        open={deployOpen}
+        onCancel={() => setDeployOpen(false)}
         onOk={() => form.submit()}
-        confirmLoading={createMutation.isPending}
-        okText="Create"
+        confirmLoading={deployMutation.isPending}
+        okText="Deploy"
       >
+        <p style={{ marginTop: 0, color: 'var(--agenda-ink-500, #888)' }}>
+          Deploys the branch to the selected environment as a single deployment record. Leave <strong>Instance</strong>{' '}
+          empty to deploy <strong>all enabled instances</strong> of the environment.
+        </p>
         <Form
           form={form}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ env: 'prod', instance_name: 'default', branch: 'master' }}
-          onFinish={(v) => createMutation.mutate(v)}
+          initialValues={{ env: 'prod', branch: 'master' }}
+          onFinish={(v) => deployMutation.mutate(v)}
         >
           <Form.Item name="env" label="Environment" rules={[{ required: true }]}>
             <Select options={ENV_OPTIONS} />
           </Form.Item>
-          <Form.Item name="instance_name" label="Instance name">
+          <Form.Item name="instance_name" label="Instance" tooltip="Leave empty to deploy all enabled instances">
             <Select
+              allowClear
               showSearch
-              placeholder="default"
+              placeholder="All instances"
               options={instanceOptions}
               notFoundContent="No enabled instances in this env"
             />
-          </Form.Item>
-          <Form.Item name="branch" label="Branch" rules={[{ required: true }]}>
-            <Input placeholder="master" className="agenda-mono" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="Deploy environment"
-        open={envModalOpen}
-        onCancel={() => setEnvModalOpen(false)}
-        onOk={() => envForm.submit()}
-        confirmLoading={envDeployMutation.isPending}
-        okText="Deploy all instances"
-      >
-        <p style={{ marginTop: 0, color: 'var(--agenda-text-secondary, #888)' }}>
-          Deploys the branch to <strong>every enabled instance</strong> of the selected environment as a single deploy
-          record.
-        </p>
-        <Form
-          form={envForm}
-          layout="vertical"
-          requiredMark={false}
-          initialValues={{ env: 'prod', branch: 'master' }}
-          onFinish={(v) => envDeployMutation.mutate(v)}
-        >
-          <Form.Item name="env" label="Environment" rules={[{ required: true }]}>
-            <Select options={ENV_OPTIONS} />
           </Form.Item>
           <Form.Item name="branch" label="Branch">
             <Input placeholder="master" className="agenda-mono" />

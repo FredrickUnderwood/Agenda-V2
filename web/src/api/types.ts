@@ -232,6 +232,8 @@ export interface EnvDeployment {
 
 export interface CreateEnvDeploymentRequest {
   env: Environment
+  // Empty/omitted = deploy every enabled instance of the env; set = just that one.
+  instance_name?: string
   branch?: string
   commit_sha?: string
   operator?: string

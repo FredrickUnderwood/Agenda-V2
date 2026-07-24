@@ -10,15 +10,17 @@ import (
 )
 
 type createEnvDeploymentRequest struct {
-	Env       domain.Environment `json:"env"        binding:"required"`
-	Branch    string             `json:"branch"`
-	CommitSHA string             `json:"commit_sha"`
-	Operator  string             `json:"operator"`
+	Env          domain.Environment `json:"env"        binding:"required"`
+	InstanceName string             `json:"instance_name"`
+	Branch       string             `json:"branch"`
+	CommitSHA    string             `json:"commit_sha"`
+	Operator     string             `json:"operator"`
 }
 
-// createEnvDeployment kicks off a whole-environment rollout: one deploy record
-// that fans out to every enabled instance of (app, env). Returns the batch with
-// its freshly created child releases; their pipelines run asynchronously.
+// createEnvDeployment kicks off a rollout as one deploy record: it fans out to
+// every enabled instance of (app, env), or to a single instance when
+// instance_name is given. Returns the batch with its freshly created child
+// releases; their pipelines run asynchronously.
 func (s *Server) createEnvDeployment(c *gin.Context) {
 	appID, ok := paramInt64(c, "appID")
 	if !ok {
@@ -30,7 +32,7 @@ func (s *Server) createEnvDeployment(c *gin.Context) {
 		FailMessage(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	batch, err := s.releaseApp.DeployEnv(c.Request.Context(), appID, req.Env, req.Branch, req.CommitSHA, req.Operator)
+	batch, err := s.releaseApp.DeployEnv(c.Request.Context(), appID, req.Env, req.InstanceName, req.Branch, req.CommitSHA, req.Operator)
 	if err != nil {
 		FailWith(c, http.StatusBadRequest, err)
 		return
