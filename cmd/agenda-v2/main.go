@@ -16,6 +16,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/application"
 	"github.com/FredrickUnderwood/agenda-v2/internal/auth"
+	"github.com/FredrickUnderwood/agenda-v2/internal/gatewayclient"
 	"github.com/FredrickUnderwood/agenda-v2/internal/handler"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/pipeline"
@@ -124,6 +125,16 @@ func main() {
 	machineMonitor := application.NewMachineMonitor(machineSvc, alertSvc, proxyResyncSvc, 30*time.Second)
 	machineMonitor.Start()
 	defer machineMonitor.Stop()
+
+	// Push edge-TLS credentials (from Settings) to the gateway on a ticker so the
+	// gateway can auto-issue certs without those secrets in its env, and so a
+	// gateway restart is re-primed. Only when gateway integration is enabled.
+	if cfg.Gateway.Enabled {
+		gatewayTLSSyncSvc := service.NewGatewayTLSSyncService(settingSvc, gatewayclient.NewClient(cfg.Gateway))
+		gatewayTLSMonitor := application.NewGatewayTLSMonitor(gatewayTLSSyncSvc, 30*time.Second)
+		gatewayTLSMonitor.Start()
+		defer gatewayTLSMonitor.Stop()
+	}
 
 	// Handler
 	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp)

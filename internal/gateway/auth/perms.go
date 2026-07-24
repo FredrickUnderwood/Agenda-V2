@@ -9,6 +9,7 @@ const (
 	PermRouteUpdate   = "route.update"   // PUT /-/routes/:routeKey
 	PermRouteRollback = "route.rollback" // POST /-/routes/:routeKey/rollback
 	PermRouteInvoke   = "route.invoke"   // data-plane request pinning to a specific instance
+	PermTLSUpdate     = "tls.update"     // PUT /-/tls (push ACME/DNS credentials)
 )
 
 func All() []string {
@@ -17,5 +18,6 @@ func All() []string {
 		PermRouteUpdate,
 		PermRouteRollback,
 		PermRouteInvoke,
+		PermTLSUpdate,
 	}
 }

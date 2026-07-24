@@ -278,7 +278,11 @@ export function RoutesTab({ appId }: { appId: number }) {
           >
             <Input placeholder="api" />
           </Form.Item>
-          <Form.Item name="host" label="Host" extra="Leave empty to match any host (wildcard).">
+          <Form.Item
+            name="host"
+            label="Host"
+            extra="Leave empty to match any host (wildcard). If edge TLS is enabled, the gateway auto-issues an HTTPS certificate for this host via ACME DNS-01 — the domain's DNS must be hosted on Aliyun (NS → *.alidns.com) and the first issue can take a few minutes to propagate before HTTPS works."
+          >
             <Input placeholder="api.example.com" />
           </Form.Item>
           <Form.Item name="path_prefix" label="Path prefix" rules={[{ required: true }]}>

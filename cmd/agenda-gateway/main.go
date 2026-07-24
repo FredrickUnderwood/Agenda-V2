@@ -13,6 +13,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/application"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/edgetls"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/handler"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/repository"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/service"
@@ -77,9 +78,27 @@ func main() {
 	}
 	defer gatewayApp.Stop()
 
-	srv := handler.NewServer(cfg, db, authMgr, routeSvc, gatewayApp)
+	// Edge TLS: when enabled, the gateway terminates TLS on :443 and auto-issues
+	// certs (ACME DNS-01) itself, replacing the standalone agenda-caddy edge. The
+	// managed-domain set is the static config list plus every live route host.
+	tlsMgr, err := edgetls.New(cfg.TLS)
+	if err != nil {
+		alog.L().Error("init edge tls failed", zap.Error(err))
+		os.Exit(1)
+	}
+	if tlsMgr != nil {
+		// Issuance stays idle until the control plane pushes ACME/DNS credentials
+		// (from Settings) to /-/tls; the reconcile loop and :443 listener are up
+		// regardless so certs already in storage keep serving.
+		tlsMgr.Start(ctx, gatewayApp.Hosts)
+		defer tlsMgr.Stop()
+	}
 
-	serverErr := make(chan error, 1)
+	srv := handler.NewServer(cfg, db, authMgr, routeSvc, gatewayApp, tlsMgr)
+
+	// Buffered for both the HTTP and (optional) HTTPS listener goroutines, so
+	// the second to exit on shutdown never blocks writing its result.
+	serverErr := make(chan error, 2)
 	go func() {
 		alog.Info(ctx, "server starting",
 			zap.String("addr", cfg.Server.Addr),
@@ -88,6 +107,12 @@ func main() {
 		)
 		serverErr <- srv.Start()
 	}()
+	if tlsMgr != nil {
+		go func() {
+			alog.Info(ctx, "tls server starting", zap.String("addr", tlsMgr.HTTPSAddr()))
+			serverErr <- srv.StartTLS()
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

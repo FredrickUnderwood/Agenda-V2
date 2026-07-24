@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/edgetls"
 )
 
 type Config struct {
@@ -16,6 +18,7 @@ type Config struct {
 	Auth          AuthConfig
 	ServiceTokens []ServiceTokenConfig
 	Gateway       GatewayConfig
+	TLS           edgetls.Options
 }
 
 type ServerConfig struct {
@@ -70,6 +73,7 @@ func Load() (*Config, error) {
 		},
 	}
 	cfg.ServiceTokens = serviceTokensFromEnv()
+	cfg.TLS = tlsOptionsFromEnv()
 	if cfg.MySQL.DSN == "" {
 		return nil, errors.New("GATEWAY_DATABASE_DSN is required")
 	}
@@ -77,6 +81,50 @@ func Load() (*Config, error) {
 		return nil, errors.New("GATEWAY_SERVICE_TOKEN is required")
 	}
 	return cfg, nil
+}
+
+// tlsOptionsFromEnv parses the edge-TLS bootstrap configuration: whether this
+// gateway is the TLS edge, its :443 listen addr, cert storage, and the
+// DNS-01 propagation-check knobs. The ACME account and Aliyun DNS credentials
+// are NOT read here — they are operator secrets managed in the control plane's
+// Settings UI and pushed in at runtime via the /-/tls admin endpoint (so they
+// can be rotated without a gateway restart). Disabled by default.
+func tlsOptionsFromEnv() edgetls.Options {
+	return edgetls.Options{
+		Enabled:            boolEnv("GATEWAY_TLS_ENABLED", false),
+		HTTPSAddr:          env("GATEWAY_TLS_ADDR", ":443"),
+		Resolvers:          splitFields(env("GATEWAY_TLS_RESOLVERS", "223.5.5.5 223.6.6.6")),
+		PropagationTimeout: durationEnv("GATEWAY_TLS_PROPAGATION_TIMEOUT", 2*time.Minute),
+		StoragePath:        env("GATEWAY_TLS_STORAGE_PATH", "/data"),
+		ReconcileInterval:  durationEnv("GATEWAY_TLS_RECONCILE_INTERVAL", 30*time.Second),
+	}
+}
+
+func boolEnv(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
+}
+
+// splitFields splits on any whitespace and/or commas, so both the Caddyfile's
+// space-separated multi-domain style and CSV work.
+func splitFields(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == ','
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func env(key, fallback string) string {

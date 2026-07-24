@@ -10,6 +10,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/edgetls"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/service"
 	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	ginzap "github.com/gin-contrib/zap"
@@ -26,8 +27,10 @@ type Server struct {
 	serviceTokens []serviceTokenEntry
 	routes        *service.RouteService
 	gateway       *application.GatewayApplication
+	tlsMgr        *edgetls.Manager
 
-	httpSrv *http.Server
+	httpSrv  *http.Server
+	httpsSrv *http.Server
 }
 
 func NewServer(
@@ -36,6 +39,7 @@ func NewServer(
 	authMgr *coreauth.Manager,
 	routes *service.RouteService,
 	gateway *application.GatewayApplication,
+	tlsMgr *edgetls.Manager,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
@@ -46,6 +50,7 @@ func NewServer(
 		serviceTokens: buildServiceTokens(cfg.ServiceTokens),
 		routes:        routes,
 		gateway:       gateway,
+		tlsMgr:        tlsMgr,
 	}
 	s.engine.Use(
 		ginzap.Ginzap(alog.L(), time.RFC3339, true),
@@ -56,6 +61,17 @@ func NewServer(
 		Addr:              cfg.Server.Addr,
 		Handler:           s.engine,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	// When edge TLS is enabled the same gin engine also serves the HTTPS data
+	// plane; CertMagic supplies certificates via TLSConfig.GetCertificate, so no
+	// cert/key files are passed to ListenAndServeTLS.
+	if tlsMgr != nil {
+		s.httpsSrv = &http.Server{
+			Addr:              tlsMgr.HTTPSAddr(),
+			Handler:           s.engine,
+			TLSConfig:         tlsMgr.TLSConfig(),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
 	}
 	return s
 }
@@ -74,6 +90,12 @@ func (s *Server) registerRoutes() {
 		routes.POST("/:routeKey/rollback", requirePerm(auth.PermRouteRollback), s.rollbackRoute)
 	}
 
+	tlsAdmin := s.engine.Group("/-/tls")
+	tlsAdmin.Use(s.authMiddleware())
+	{
+		tlsAdmin.PUT("", requirePerm(auth.PermTLSUpdate), s.updateTLSConfig)
+	}
+
 	s.engine.NoRoute(s.proxy)
 }
 
@@ -81,11 +103,30 @@ func (s *Server) Start() error {
 	return s.httpSrv.ListenAndServe()
 }
 
-func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpSrv == nil {
-		return nil
+// StartTLS blocks serving the HTTPS data plane. It returns http.ErrServerClosed
+// immediately when edge TLS is disabled, so callers can treat it uniformly with
+// Start without special-casing the nil listener.
+func (s *Server) StartTLS() error {
+	if s.httpsSrv == nil {
+		return http.ErrServerClosed
 	}
-	return s.httpSrv.Shutdown(ctx)
+	// Certs come from TLSConfig.GetCertificate (CertMagic); no files here.
+	return s.httpsSrv.ListenAndServeTLS("", "")
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	var firstErr error
+	if s.httpSrv != nil {
+		if err := s.httpSrv.Shutdown(ctx); err != nil {
+			firstErr = err
+		}
+	}
+	if s.httpsSrv != nil {
+		if err := s.httpsSrv.Shutdown(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (s *Server) health(c *gin.Context) {

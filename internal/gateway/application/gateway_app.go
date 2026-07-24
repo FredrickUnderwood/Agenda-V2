@@ -205,6 +205,26 @@ func (a *GatewayApplication) LookupRouteConfig(host, path string) (instanceSelec
 	return "", "", false
 }
 
+// Hosts returns the distinct, non-wildcard hostnames across all cached routes.
+// The edge-TLS manager polls this to decide which domains need certificates.
+func (a *GatewayApplication) Hosts() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	seen := make(map[string]struct{}, len(a.snapshots))
+	hosts := make([]string, 0, len(a.snapshots))
+	for _, route := range a.snapshots {
+		if route.Host == "" || route.Host == "*" {
+			continue
+		}
+		if _, ok := seen[route.Host]; ok {
+			continue
+		}
+		seen[route.Host] = struct{}{}
+		hosts = append(hosts, route.Host)
+	}
+	return hosts
+}
+
 func (a *GatewayApplication) refreshLoop() {
 	defer a.wg.Done()
 	ticker := time.NewTicker(a.refreshInterval)
