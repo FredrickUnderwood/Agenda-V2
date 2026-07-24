@@ -12,6 +12,7 @@ import type {
   EnvDeployment,
 } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
+import { RefreshButton } from '@/components/RefreshButton'
 import { errorMessage } from '@/utils/errorMessage'
 import { ReleaseDetailDrawer } from './ReleaseDetailDrawer'
 import { EnvDeploymentDrawer } from './EnvDeploymentDrawer'
@@ -81,6 +82,13 @@ export function ReleasesTab({ appId }: { appId: number }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+        <RefreshButton
+          queryKeys={[
+            ['releases', 'byApp', appId],
+            ['env-deployments', 'byApp', appId],
+            ['applications', appId, 'instances'],
+          ]}
+        />
         <Button icon={<RocketOutlined />} onClick={() => setEnvModalOpen(true)}>
           Deploy environment
         </Button>

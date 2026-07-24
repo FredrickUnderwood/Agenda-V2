@@ -25,6 +25,7 @@ import type {
   GatewayInstanceSelectMode,
 } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
+import { RefreshButton } from '@/components/RefreshButton'
 import { errorMessage } from '@/utils/errorMessage'
 import { buildTargetsPayload, routesForEnv, routeToRequest } from './targetPayload'
 
@@ -184,9 +185,12 @@ export function RoutesTab({ appId }: { appId: number }) {
         <span style={{ color: 'var(--agenda-ink-500, #888)', fontSize: 13 }}>
           Gateway routes map an inbound host/path to this app's instances. Routes are scoped per environment.
         </span>
-        <Button icon={<PlusOutlined />} onClick={openCreate} disabled={envsWithInstances.length === 0}>
-          Add route
-        </Button>
+        <Space>
+          <RefreshButton queryKeys={[['applications', appId, 'instances']]} />
+          <Button icon={<PlusOutlined />} onClick={openCreate} disabled={envsWithInstances.length === 0}>
+            Add route
+          </Button>
+        </Space>
       </div>
 
       <Table<RouteRow>

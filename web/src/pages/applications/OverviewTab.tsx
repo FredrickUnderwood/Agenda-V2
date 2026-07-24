@@ -5,6 +5,7 @@ import type { CollapseProps } from 'antd'
 import * as api from '@/api/applications'
 import type { Application, DeployMethod, UpdateApplicationRequest } from '@/api/types'
 import { errorMessage } from '@/utils/errorMessage'
+import { RefreshButton } from '@/components/RefreshButton'
 import { DeployConfigFields, DockerHealthCheckFields } from './DeployConfigFields'
 import { buildDeployConfig, parseDeployConfig, type DeployConfigForm } from './deployConfig'
 
@@ -102,6 +103,9 @@ export function OverviewTab({ app }: { app: Application }) {
 
   return (
     <div style={{ maxWidth: 680 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <RefreshButton queryKeys={[['applications', app.id]]} />
+      </div>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={handleFinish}>
         <Collapse defaultActiveKey={['basics', 'deploy']} items={items} />
 

@@ -7,6 +7,7 @@ import * as api from '@/api/applications'
 import * as machinesApi from '@/api/machines'
 import type { ApplicationEnvTarget, ApplicationEnvTargetRequest } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
+import { RefreshButton } from '@/components/RefreshButton'
 import { errorMessage } from '@/utils/errorMessage'
 import { buildTargetsPayload } from './targetPayload'
 
@@ -43,7 +44,8 @@ export function InstancesTab({ appId }: { appId: number }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+        <RefreshButton queryKeys={[['applications', appId, 'instances'], ['machines']]} />
         <Button icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
           Add instance
         </Button>
