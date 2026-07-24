@@ -28,6 +28,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -195,6 +196,12 @@ func (m *Manager) newMagic(issuer certmagic.Issuer) (*certmagic.Config, *certmag
 	magic = certmagic.New(cache, certmagic.Config{
 		Storage: m.storage,
 		Logger:  m.logger,
+		// ACME Renewal Info (ARI) is a renewal-timing optimization served from
+		// the CA's own host (for ZeroSSL: ari.trust-provider.com), which is not
+		// reachable from mainland Aliyun nodes. Leaving it on makes the ARI GET
+		// time out and stall/retry inside issuance; disabling it falls back to
+		// plain time-based renewal (RenewalWindowRatio) with no downside here.
+		DisableARI: true,
 	})
 	if issuer != nil {
 		magic.Issuers = []certmagic.Issuer{issuer}
@@ -369,20 +376,17 @@ func (m *Manager) reconcile(ctx context.Context) error {
 
 func (m *Manager) desiredDomains(static []string) []string {
 	set := make(map[string]struct{})
-	for _, d := range static {
-		if d = normalizeDomain(d); d != "" {
+	add := func(d string) {
+		if d = normalizeDomain(d); d != "" && publiclyCertifiable(d) {
 			set[d] = struct{}{}
 		}
 	}
+	for _, d := range static {
+		add(d)
+	}
 	if m.source != nil {
 		for _, d := range m.source() {
-			// A wildcard "*" catch-all route is not a real hostname; skip it.
-			if d == "*" {
-				continue
-			}
-			if d = normalizeDomain(d); d != "" {
-				set[d] = struct{}{}
-			}
+			add(d)
 		}
 	}
 	out := make([]string, 0, len(set))
@@ -391,6 +395,33 @@ func (m *Manager) desiredDomains(static []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// publiclyCertifiable reports whether a hostname is worth asking a public ACME
+// CA to certify. Route hosts include internal/test names — a wildcard "*"
+// catch-all, IP literals, single-label names, and reserved TLDs like .local —
+// which can never get a public cert; managing them just spams the CA with
+// doomed orders (wasting rate limit) and floods logs with "does not qualify"
+// errors. Skip them so only real public domains enter the managed set.
+func publiclyCertifiable(host string) bool {
+	if host == "" || host == "*" {
+		return false
+	}
+	if strings.ContainsAny(host, "*") {
+		return false // wildcard route patterns aren't concrete hostnames
+	}
+	if net.ParseIP(host) != nil {
+		return false // IP literal
+	}
+	i := strings.LastIndexByte(host, '.')
+	if i < 0 || i == len(host)-1 {
+		return false // single-label (no dot) or trailing-dot-only
+	}
+	switch host[i+1:] {
+	case "local", "localhost", "internal", "lan", "home", "test", "invalid", "example":
+		return false // reserved / non-public TLDs
+	}
+	return true
 }
 
 func (m *Manager) ctxOrBackground() context.Context {

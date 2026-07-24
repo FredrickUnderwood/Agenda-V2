@@ -126,7 +126,9 @@ func TestReconfigureThenReady(t *testing.T) {
 func TestDesiredDomains(t *testing.T) {
 	m := &Manager{
 		source: func() []string {
-			return []string{"*", "API.example.com", "admin.example.com"}
+			// wildcard, internal .local, IP literal, single-label -> all filtered;
+			// plus a real host that dups a static one (different case).
+			return []string{"*", "API.example.com", "admin.example.com", "agenda-example.local", "192.168.1.4", "internalsvc"}
 		},
 	}
 	got := m.desiredDomains([]string{"Admin.example.com", "web.example.com", " web.example.com "})
@@ -137,6 +139,21 @@ func TestDesiredDomains(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("desiredDomains()[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestPubliclyCertifiable(t *testing.T) {
+	yes := []string{"ai-sbti.top", "api.example.com", "a.b.c.example.io"}
+	no := []string{"", "*", "*.example.com", "agenda-example.local", "192.168.1.4", "localhost", "internalsvc", "foo.internal", "bar.test"}
+	for _, h := range yes {
+		if !publiclyCertifiable(h) {
+			t.Errorf("publiclyCertifiable(%q) = false, want true", h)
+		}
+	}
+	for _, h := range no {
+		if publiclyCertifiable(h) {
+			t.Errorf("publiclyCertifiable(%q) = true, want false", h)
 		}
 	}
 }
