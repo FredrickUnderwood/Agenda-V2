@@ -99,7 +99,9 @@ export function InstanceLogsPage() {
             {file.lines.length === 0 ? (
               <span style={{ opacity: 0.6 }}>No log lines yet — this instance hasn't written anything.</span>
             ) : (
-              file.lines.map((line, i) => (
+              // Newest first: the node tails lines oldest→newest; reverse a copy
+              // so the most recent line renders at the top (source array untouched).
+              file.lines.slice().reverse().map((line, i) => (
                 <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                   {line}
                 </div>
