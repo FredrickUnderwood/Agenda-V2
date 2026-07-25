@@ -109,6 +109,17 @@ func (a *GatewayApplication) ServeProxy(w http.ResponseWriter, r *http.Request, 
 
 	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
 	defer cancel()
+
+	// Trace propagation: reuse the caller's trace id (an upstream agenda service
+	// or a client that set one) or mint a fresh one, so this request is
+	// correlatable across the gateway and the backend's own logs. It's forwarded
+	// to the backend on the request and echoed on the response. Matches
+	// sdk/go/log.TraceHeader so a backend using ginlog.Middleware logs the same id.
+	traceID := r.Header.Get(alog.TraceHeader)
+	if traceID == "" {
+		traceID = alog.NewTraceID()
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -122,12 +133,19 @@ func (a *GatewayApplication) ServeProxy(w http.ResponseWriter, r *http.Request, 
 		req.Header.Set("X-Agenda-Env", route.Env)
 		req.Header.Set("X-Agenda-Release", route.CurrentReleaseID)
 		req.Header.Set("X-Agenda-Backend", backend.TargetKey)
+		req.Header.Set(alog.TraceHeader, traceID)
 		appendForwardedHeaders(req, r)
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// Set (not add) so a backend echoing the header doesn't duplicate it.
+		resp.Header.Set(alog.TraceHeader, traceID)
+		return nil
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
 		alog.L().Warn("proxy request failed",
 			zap.String("route_key", route.RouteKey),
 			zap.String("backend", backend.URL),
+			zap.String("trace_id", traceID),
 			zap.Error(err),
 		)
 		http.Error(rw, "bad gateway", http.StatusBadGateway)

@@ -117,7 +117,7 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 		Exec: &ComposeUpStep{
 			Machine: machine, WorkDir: dockerCfg.WorkDir, ComposeFile: composeFile,
 			ProjectName: projectName, Port: port, MetricsPort: metricsPort, Services: dockerCfg.Services,
-			AppName: target.App.Name, Branch: target.Branch, InstanceName: targetInstanceName(target),
+			AppName: target.App.Name, Branch: target.Branch, EnvName: string(target.Env()), InstanceName: targetInstanceName(target),
 			LogDir: logDir,
 			Env:    mergedEnv,
 		},

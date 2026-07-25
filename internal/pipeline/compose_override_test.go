@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildOverrideYAML_PerServiceEnvDisambiguation(t *testing.T) {
-	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", "", []string{"api", "worker"}, nil)
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "prod", "default", "", []string{"api", "worker"}, nil)
 	if err != nil {
 		t.Fatalf("buildOverrideYAML: %v", err)
 	}
@@ -35,6 +35,9 @@ func TestBuildOverrideYAML_PerServiceEnvDisambiguation(t *testing.T) {
 		}
 		wantInstance := "AGENDA_INSTANCE_NAME=default"
 		wantService := "AGENDA_SERVICE_NAME=" + svcName
+		if !contains(svc.Environment, "AGENDA_ENV=prod") {
+			t.Errorf("service %q env missing AGENDA_ENV=prod, got %v", svcName, svc.Environment)
+		}
 		if !contains(svc.Environment, wantInstance) {
 			t.Errorf("service %q env missing %q, got %v", svcName, wantInstance, svc.Environment)
 		}
@@ -54,7 +57,7 @@ func TestBuildOverrideYAML_PerServiceEnvDisambiguation(t *testing.T) {
 }
 
 func TestBuildOverrideYAML_MetricsAddr(t *testing.T) {
-	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", ":9464", []string{"api"}, nil)
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "prod", "default", ":9464", []string{"api"}, nil)
 	if err != nil {
 		t.Fatalf("buildOverrideYAML: %v", err)
 	}
@@ -72,7 +75,7 @@ func TestBuildOverrideYAML_MetricsAddr(t *testing.T) {
 }
 
 func TestBuildOverrideYAML_MetricsAddrEmpty_OmitsVar(t *testing.T) {
-	raw, err := buildOverrideYAML("./logs", "myapp", "main", "default", "", []string{"api"}, nil)
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "prod", "default", "", []string{"api"}, nil)
 	if err != nil {
 		t.Fatalf("buildOverrideYAML: %v", err)
 	}

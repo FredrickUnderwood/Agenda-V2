@@ -45,15 +45,17 @@ func composeServiceNames(raw []byte) ([]string, error) {
 // logDir is this instance's own runtime log directory
 // (git.InstanceLogDir → <root>/run/<app>/<env>/<instance>/logs), so every
 // service in this compose file shares it but no other instance does — the mount
-// itself isolates instances. instanceName and each service's own name are still
-// injected as AGENDA_INSTANCE_NAME / AGENDA_SERVICE_NAME (the metrics SDK labels
-// with them, and the log sink keeps them in its filename for readability), but
-// they are no longer load-bearing for log isolation.
+// itself isolates instances. envName / instanceName and each service's own name
+// are injected as AGENDA_ENV / AGENDA_INSTANCE_NAME / AGENDA_SERVICE_NAME — the
+// SDK's log sink attaches them as env/instance/service fields on every line and
+// the metrics SDK labels with them, so an app's logs and metrics carry matching
+// identity. (instanceName also still appears in the log filename for
+// readability, but is no longer load-bearing for log isolation.)
 //
 // metricsAddr, when non-empty (target has MetricsEnabled), additionally
 // injects AGENDA_METRICS_ADDR so sdk/go/metric knows where to listen; empty
 // omits the var entirely, leaving metrics registered-but-unserved by default.
-func buildOverrideYAML(logDir, appName, branch, instanceName, metricsAddr string, services []string, userEnv map[string]string) ([]byte, error) {
+func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAddr string, services []string, userEnv map[string]string) ([]byte, error) {
 	type svc struct {
 		Volumes     []string `yaml:"volumes"`
 		Environment []string `yaml:"environment"`
@@ -69,7 +71,7 @@ func buildOverrideYAML(logDir, appName, branch, instanceName, metricsAddr string
 	sort.Strings(userKeys)
 
 	buildEnv := func(serviceName string) []string {
-		env := make([]string, 0, len(userKeys)+5)
+		env := make([]string, 0, len(userKeys)+6)
 		for _, k := range userKeys {
 			env = append(env, k+"="+userEnv[k])
 		}
@@ -77,6 +79,7 @@ func buildOverrideYAML(logDir, appName, branch, instanceName, metricsAddr string
 			"AGENDA_APP_NAME="+appName,
 			"AGENDA_LOG_DIR="+contract.AgendaContainerLogDir,
 			"AGENDA_REPO_BRANCH="+branch,
+			"AGENDA_ENV="+envName,
 			"AGENDA_INSTANCE_NAME="+instanceName,
 			"AGENDA_SERVICE_NAME="+serviceName,
 		)
@@ -138,7 +141,7 @@ func ensureRemoteDir(ctx context.Context, r runner.Runner, path string) error {
 func writeAgendaOverride(
 	ctx context.Context,
 	machine *config.MachineConfig,
-	localPath, composeFile, workDir, logDir, appName, branch, instanceName, metricsAddr string,
+	localPath, composeFile, workDir, logDir, appName, branch, envName, instanceName, metricsAddr string,
 	servicesFilter []string,
 	userEnv map[string]string,
 ) (string, error) {
@@ -172,7 +175,7 @@ func writeAgendaOverride(
 		return "", errors.New("no services to augment in " + composeAbs)
 	}
 
-	overrideYAML, err := buildOverrideYAML(logDir, appName, branch, instanceName, metricsAddr, targets, userEnv)
+	overrideYAML, err := buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAddr, targets, userEnv)
 	if err != nil {
 		return "", err
 	}

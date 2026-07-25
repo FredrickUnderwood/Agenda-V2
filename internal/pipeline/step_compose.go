@@ -54,9 +54,9 @@ func (s *ComposePullStep) Execute(ctx context.Context, rc *RunContext) error {
 // (<LocalPath>/.agenda/compose.override.yml) that mounts this instance's
 // runtime log dir (LogDir, an absolute host path outside the code checkout)
 // into each target service at /var/log/agenda and injects
-// AGENDA_APP_NAME / AGENDA_LOG_DIR / AGENDA_REPO_BRANCH / AGENDA_INSTANCE_NAME
-// / AGENDA_SERVICE_NAME plus the merged (application < env < instance) user
-// env vars.
+// AGENDA_APP_NAME / AGENDA_LOG_DIR / AGENDA_REPO_BRANCH / AGENDA_ENV /
+// AGENDA_INSTANCE_NAME / AGENDA_SERVICE_NAME plus the merged
+// (application < env < instance) user env vars.
 type ComposeUpStep struct {
 	Machine     *config.MachineConfig
 	WorkDir     string
@@ -68,6 +68,7 @@ type ComposeUpStep struct {
 
 	AppName      string
 	Branch       string
+	EnvName      string
 	InstanceName string
 
 	// LogDir is the absolute host path of this instance's runtime log directory
@@ -90,7 +91,7 @@ func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
 	overridePath, err := writeAgendaOverride(
 		ctx, s.Machine,
 		rc.LocalPath, s.ComposeFile, s.WorkDir, s.LogDir,
-		s.AppName, s.Branch, s.InstanceName, metricsAddr,
+		s.AppName, s.Branch, s.EnvName, s.InstanceName, metricsAddr,
 		s.Services,
 		s.Env,
 	)

@@ -51,6 +51,10 @@ type Config struct {
 	InstanceName string
 	ServiceName  string
 	ReplicaID    string
+	// Env is the deploy environment (e.g. prod/test), attached as the "env"
+	// field to every log line. Platform-injected via AGENDA_ENV; empty omits
+	// the field.
+	Env string
 }
 
 // firstNonEmpty returns the first non-empty value, letting an explicit Config
@@ -91,6 +95,7 @@ func Init(cfg Config) error {
 	logDir := firstNonEmpty(cfg.LogDir, os.Getenv("AGENDA_LOG_DIR"))
 	instanceName := firstNonEmpty(cfg.InstanceName, os.Getenv("AGENDA_INSTANCE_NAME"))
 	serviceName := firstNonEmpty(cfg.ServiceName, os.Getenv("AGENDA_SERVICE_NAME"))
+	env := firstNonEmpty(cfg.Env, os.Getenv("AGENDA_ENV"))
 	replicaID := firstNonEmpty(cfg.ReplicaID, os.Getenv("AGENDA_REPLICA_ID"))
 	// When no explicit replica id is given but per-replica logging is opted
 	// into, derive one from the container hostname (unique per replica under
@@ -139,8 +144,26 @@ func Init(cfg Config) error {
 			return zapcore.NewTee(core, fileCore)
 		}))
 	}
+	// Attach the platform-injected identity as persistent fields so every log
+	// line is attributable to a specific service/env/instance without the app
+	// having to thread them through each call (app was already attached this
+	// way). instance/service/env are also what sdk/go/metric labels with, so an
+	// app's logs and metrics carry matching identity.
+	idFields := make([]zap.Field, 0, 4)
 	if appName != "" {
-		l = l.With(zap.String("app", appName))
+		idFields = append(idFields, zap.String("app", appName))
+	}
+	if serviceName != "" {
+		idFields = append(idFields, zap.String("service", serviceName))
+	}
+	if env != "" {
+		idFields = append(idFields, zap.String("env", env))
+	}
+	if instanceName != "" {
+		idFields = append(idFields, zap.String("instance", instanceName))
+	}
+	if len(idFields) > 0 {
+		l = l.With(idFields...)
 	}
 	mu.Lock()
 	logger = l
@@ -184,10 +207,19 @@ func Shutdown() {
 }
 
 func withContext(ctx context.Context, fields []zap.Field) []zap.Field {
-	if ctx == nil || ContextFields == nil {
+	if ctx == nil {
 		return fields
 	}
-	extra := ContextFields(ctx)
+	var extra []zap.Field
+	// Emit the agenda trace id (set by ginlog.Middleware / propagated via
+	// Transport) automatically, independent of any user-supplied ContextFields
+	// hook, so request logs correlate across services out of the box.
+	if id := TraceIDFromContext(ctx); id != "" {
+		extra = append(extra, zap.String(traceField, id))
+	}
+	if ContextFields != nil {
+		extra = append(extra, ContextFields(ctx)...)
+	}
 	if len(extra) == 0 {
 		return fields
 	}
