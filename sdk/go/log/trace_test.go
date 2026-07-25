@@ -97,6 +97,42 @@ func TestTraceIDFromRequest(t *testing.T) {
 	}
 }
 
+func TestTraceMiddleware_GeneratesAndEchoes(t *testing.T) {
+	var seen string
+	h := TraceMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = TraceIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if seen == "" {
+		t.Fatal("handler context had no trace id")
+	}
+	if got := rec.Header().Get(TraceHeader); got != seen {
+		t.Errorf("response header %q != ctx id %q", got, seen)
+	}
+}
+
+func TestTraceMiddleware_ReusesIncoming(t *testing.T) {
+	var seen string
+	h := TraceMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = TraceIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(TraceHeader, "upstream")
+	h.ServeHTTP(rec, req)
+
+	if seen != "upstream" {
+		t.Errorf("ctx trace id = %q, want upstream (reused)", seen)
+	}
+	if got := rec.Header().Get(TraceHeader); got != "upstream" {
+		t.Errorf("response header = %q, want upstream", got)
+	}
+}
+
 // captureRT records the trace header of the request it receives.
 type captureRT struct{ seen string }
 

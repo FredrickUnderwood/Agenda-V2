@@ -58,6 +58,28 @@ func NewTraceID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// TraceMiddleware wraps next with agenda trace propagation for net/http servers
+// (the gin equivalent is ginlog.Middleware). It reuses the incoming
+// X-Agenda-Trace-Id header (set by the agenda gateway) or mints one when absent,
+// stores it on the request context so log.Info(r.Context(), ...) and friends
+// emit trace_id, and echoes it on the response so the caller can correlate:
+//
+//	handler := log.TraceMiddleware(mux)
+//	http.ListenAndServe(addr, handler)
+func TraceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := TraceIDFromRequest(r)
+		if id == "" {
+			id = NewTraceID()
+		}
+		if id != "" {
+			w.Header().Set(TraceHeader, id)
+			r = r.WithContext(ContextWithTraceID(r.Context(), id))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Transport is an http.RoundTripper that propagates the caller's trace id: it
 // copies the trace id from the request context into the outgoing
 // X-Agenda-Trace-Id header (unless the request already carries one), so a
