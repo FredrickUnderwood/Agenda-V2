@@ -94,6 +94,23 @@ func TestBuildOverrideYAML_MetricsAddrEmpty_OmitsVar(t *testing.T) {
 	}
 }
 
+// TestAgendaOverrideRelPath_PerInstance locks in the fix for the concurrent
+// clobber: instances of the same app/branch share LocalPath, so their override
+// files must not collide, or an env-wide parallel batch deploy can bring an
+// instance up with a sibling's AGENDA_INSTANCE_NAME and log mount.
+func TestAgendaOverrideRelPath_PerInstance(t *testing.T) {
+	blue := agendaOverrideRelPath("agenda-example-master-prod-blue")
+	def := agendaOverrideRelPath("agenda-example-master-prod-default")
+	if blue == def {
+		t.Fatalf("override paths collide across instances: %q", blue)
+	}
+	for _, p := range []string{blue, def} {
+		if !strings.HasPrefix(p, ".agenda/") || !strings.HasSuffix(p, ".yml") {
+			t.Errorf("unexpected override path shape: %q", p)
+		}
+	}
+}
+
 func contains(vals []string, want string) bool {
 	for _, v := range vals {
 		if v == want {

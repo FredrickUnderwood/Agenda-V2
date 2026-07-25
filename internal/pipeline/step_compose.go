@@ -90,7 +90,7 @@ func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
 	}
 	overridePath, err := writeAgendaOverride(
 		ctx, s.Machine,
-		rc.LocalPath, s.ComposeFile, s.WorkDir, s.LogDir,
+		rc.LocalPath, s.ComposeFile, s.WorkDir, s.ProjectName, s.LogDir,
 		s.AppName, s.Branch, s.EnvName, s.InstanceName, metricsAddr,
 		s.Services,
 		s.Env,

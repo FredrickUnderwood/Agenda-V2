@@ -16,9 +16,20 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
-// agendaOverrideRelPath is the override file path under LocalPath. Kept under
-// a dot-prefixed dir so it doesn't pollute the user's repo working tree.
-const agendaOverrideRelPath = ".agenda/compose.override.yml"
+// agendaOverrideRelPath is the override file path under LocalPath, kept under a
+// dot-prefixed dir so it doesn't pollute the user's repo working tree.
+//
+// It MUST be keyed by projectName: instances of the same app+branch on one
+// machine share LocalPath (git.ResolveLocalPath keys on repo+branch+machine,
+// not instance), so a single fixed filename here lets concurrent per-instance
+// deploys — e.g. an env-wide parallel batch (blue + default at once) — clobber
+// each other's override file. The loser's `docker compose up` then reads the
+// winner's override and comes up with the WRONG AGENDA_INSTANCE_NAME and log-dir
+// mount. projectName is unique per app-branch-env-instance, so each instance
+// writes (and `-f`-references) its own file.
+func agendaOverrideRelPath(projectName string) string {
+	return ".agenda/compose.override." + projectName + ".yml"
+}
 
 // composeServiceNames returns the top-level keys under `services:` from a
 // docker-compose file.
@@ -131,8 +142,11 @@ func ensureRemoteDir(ctx context.Context, r runner.Runner, path string) error {
 // writeAgendaOverride is the high-level helper used by ComposeUpStep: reads
 // the user's compose file, picks the services to augment (explicit list when
 // non-empty, otherwise all of them), generates the override YAML, and writes
-// it to <localPath>/.agenda/compose.override.yml. Returns the absolute
-// override path on the target.
+// it to <localPath>/.agenda/compose.override.<projectName>.yml. Returns the
+// absolute override path on the target.
+//
+// projectName keys the override filename so concurrent per-instance deploys
+// sharing localPath don't clobber each other (see agendaOverrideRelPath).
 //
 // logDir is the absolute host path of this instance's runtime log directory
 // (git.InstanceLogDir); it is created on the target and bind-mounted into every
@@ -141,7 +155,7 @@ func ensureRemoteDir(ctx context.Context, r runner.Runner, path string) error {
 func writeAgendaOverride(
 	ctx context.Context,
 	machine *config.MachineConfig,
-	localPath, composeFile, workDir, logDir, appName, branch, envName, instanceName, metricsAddr string,
+	localPath, composeFile, workDir, projectName, logDir, appName, branch, envName, instanceName, metricsAddr string,
 	servicesFilter []string,
 	userEnv map[string]string,
 ) (string, error) {
@@ -183,10 +197,11 @@ func writeAgendaOverride(
 	if err := ensureRemoteDir(ctx, r, logDir); err != nil {
 		return "", errors.New("create host log dir: " + err.Error())
 	}
-	if err := writeRemoteFile(ctx, r, localPath, agendaOverrideRelPath, overrideYAML); err != nil {
+	relPath := agendaOverrideRelPath(projectName)
+	if err := writeRemoteFile(ctx, r, localPath, relPath, overrideYAML); err != nil {
 		return "", errors.New("write override: " + err.Error())
 	}
-	return filepath.Join(localPath, agendaOverrideRelPath), nil
+	return filepath.Join(localPath, relPath), nil
 }
 
 // shQuote single-quotes s for safe inclusion in a /bin/sh command.
