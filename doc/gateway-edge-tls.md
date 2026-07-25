@@ -1,86 +1,119 @@
-# Gateway 内置边缘 TLS（合并 agenda-caddy）
+# Gateway built-in edge TLS (absorbing agenda-caddy)
 
-`agenda-gateway` 现在可以自己在 `:443` 终止 TLS 并通过 ACME 自动签发证书，取代独立的
-`agenda-caddy` 边缘容器。证书内核用的是 Caddy 的 [CertMagic](https://github.com/caddyserver/certmagic)
-库（内嵌进 gateway 进程，不再多起一个 Caddy 进程），实现见 `internal/gateway/edgetls`。
+`agenda-gateway` can now terminate TLS on `:443` itself and obtain certificates
+automatically via ACME, replacing the standalone `agenda-caddy` edge container.
+The certificate engine is Caddy's [CertMagic](https://github.com/caddyserver/certmagic)
+library (embedded into the gateway process — no separate Caddy process); the
+implementation lives in `internal/gateway/edgetls`.
 
-默认**关闭**（`GATEWAY_TLS_ENABLED=false`），开启前不影响现有 `:8080` 明文数据面。
+It is **off by default** (`GATEWAY_TLS_ENABLED=false`); enabling it does not
+affect the existing `:8080` plaintext data plane.
 
-## 为什么只走 DNS-01 + ZeroSSL
+## Why DNS-01 + ZeroSSL only
 
-沿用 `agenda-caddy` 踩过的坑（阿里云大陆节点）：
+Carrying over the lessons learned with `agenda-caddy` (on mainland-China Aliyun
+nodes):
 
-- 大陆节点对**未备案域名**在 `80` 端口强制返回备案拦截页，HTTP-01 / TLS-ALPN 校验必然失败；
-- Let's Encrypt 的 ACME 接口在大陆基本连不通。
+- Mainland nodes force an ICP-filing interception page on port `80` for any
+  **unfiled domain**, so HTTP-01 / TLS-ALPN validation is guaranteed to fail.
+- Let's Encrypt's ACME endpoints are essentially unreachable from mainland China.
 
-所以固定：**CA = ZeroSSL（需 EAB）**，**校验 = DNS-01（阿里云 alidns 插件自动加 `_acme-challenge` TXT）**，
-全程不碰 80 端口。传播检查强制用阿里公共 DNS `223.5.5.5/223.6.6.6`（容器内嵌 DNS `127.0.0.11`
-查不到权威 TXT 会僵死），并设 2m 超时兜底。这些默认值都已内置，通常无需改。
+So the defaults are fixed: **CA = ZeroSSL (requires EAB)**, **validation = DNS-01
+(the Aliyun alidns plugin adds the `_acme-challenge` TXT record automatically)**,
+and port 80 is never touched. Propagation checks are forced to use the Aliyun
+public DNS `223.5.5.5/223.6.6.6` (the container's embedded resolver `127.0.0.11`
+would hang, unable to see the authoritative TXT record), with a 2m timeout as a
+backstop. These defaults are all built in and usually need no changes.
 
-## 配置分两层：bootstrap 环境变量 + Settings 凭据
+## Configuration has two layers: bootstrap env vars + Settings credentials
 
-**敏感凭据（AccessKey / EAB / 邮箱）不再写进 gateway 的环境变量**，而是走控制面的
-**Settings**（加密存储），由控制面周期推送给 gateway、热更新，无需重启。gateway 环境变量只留
-不敏感的 bootstrap 项（决定进程/端口生命周期）。
+**Sensitive credentials (AccessKey / EAB / email) are no longer written into the
+gateway's environment variables.** They go through the control plane's
+**Settings** (encrypted at rest), which the control plane pushes to the gateway
+periodically and hot-reloads — no restart required. The gateway's env vars keep
+only the non-sensitive bootstrap items (those that govern the process/port
+lifecycle).
 
-### 1) gateway bootstrap 环境变量
+### 1) gateway bootstrap env vars
 
-| gateway 变量 | 说明 |
+| gateway var | description |
 |---|---|
-| `GATEWAY_TLS_ENABLED` | `true` 让这台 gateway 充当 TLS 边缘（绑 `:443`），默认 `false` |
-| `GATEWAY_TLS_ADDR` | TLS 监听地址，默认 `:443` |
-| `GATEWAY_TLS_RESOLVERS` | DNS-01 传播检查 DNS，默认 `223.5.5.5 223.6.6.6` |
-| `GATEWAY_TLS_PROPAGATION_TIMEOUT` | 默认 `2m` |
-| `GATEWAY_TLS_STORAGE_PATH` | 证书/账户持久化目录，默认 `/data`（须挂持久卷） |
-| `GATEWAY_TLS_RECONCILE_INTERVAL` | 重新计算托管域名集合的周期，默认 `30s` |
+| `GATEWAY_TLS_ENABLED` | `true` makes this gateway act as a TLS edge (binds `:443`); default `false` |
+| `GATEWAY_TLS_ADDR` | TLS listen address, default `:443` |
+| `GATEWAY_TLS_RESOLVERS` | DNS servers for the DNS-01 propagation check, default `223.5.5.5 223.6.6.6` |
+| `GATEWAY_TLS_PROPAGATION_TIMEOUT` | default `2m` |
+| `GATEWAY_TLS_STORAGE_PATH` | certificate/account persistence directory, default `/data` (must be a persistent volume) |
+| `GATEWAY_TLS_RECONCILE_INTERVAL` | how often the managed-domain set is recomputed, default `30s` |
 
-### 2) 控制面 Settings 凭据（Settings 页 → "Gateway edge TLS" 面板）
+### 2) control-plane Settings credentials (Settings page → "Gateway edge TLS" panel)
 
-Setting key 命名空间 `gateway.tls.`（与 `internal/service/gateway_tls_sync_service.go` 一致）：
+Setting keys under the `gateway.tls.` namespace (matching
+`internal/service/gateway_tls_sync_service.go`):
 
-| Setting key | secret | 对应 agenda-caddy | 说明 |
+| Setting key | secret | agenda-caddy equivalent | description |
 |---|:---:|---|---|
-| `gateway.tls.acme_email` | | `ACME_EMAIL` | ACME 账户邮箱（必填） |
-| `gateway.tls.aliyun_ak_id` | ✔ | `ALIYUN_AK_ID` | 阿里云 RAM AccessKey ID（授 `AliyunDNSFullAccess`，必填） |
-| `gateway.tls.aliyun_ak_secret` | ✔ | `ALIYUN_AK_SECRET` | 阿里云 RAM AccessKey Secret（必填） |
+| `gateway.tls.acme_email` | | `ACME_EMAIL` | ACME account email (required) |
+| `gateway.tls.aliyun_ak_id` | ✔ | `ALIYUN_AK_ID` | Aliyun RAM AccessKey ID (grant `AliyunDNSFullAccess`, required) |
+| `gateway.tls.aliyun_ak_secret` | ✔ | `ALIYUN_AK_SECRET` | Aliyun RAM AccessKey Secret (required) |
 | `gateway.tls.eab_kid` | ✔ | `ZEROSSL_EAB_KID` | ZeroSSL EAB key id |
 | `gateway.tls.eab_hmac` | ✔ | `ZEROSSL_EAB_HMAC` | ZeroSSL EAB hmac key |
-| `gateway.tls.acme_ca` | | Caddyfile `dir` | ACME 目录 URL，默认 ZeroSSL `https://acme.zerossl.com/v2/DV90` |
-| `gateway.tls.dns_provider` | | — | 目前仅支持 `alidns`（默认） |
-| `gateway.tls.static_domains` | | Caddyfile 站点地址 | 除路由 host 外要额外签发的域名，空格/逗号分隔 |
+| `gateway.tls.acme_ca` | | Caddyfile `dir` | ACME directory URL, default ZeroSSL `https://acme.zerossl.com/v2/DV90` |
+| `gateway.tls.dns_provider` | | — | only `alidns` is supported for now (default) |
+| `gateway.tls.static_domains` | | Caddyfile site addresses | extra domains to issue certs for beyond the route hosts, space/comma separated |
 
-标 secret 的项在 Settings 里勾选 "Secret"，落库时用 `secret.Box` 加密。前端 Settings 页有
-「Gateway edge TLS」面板，逐项列出这些 key（含 required/secret 标记），点 "Set" 直接预填新增。
+Items marked secret are ticked "Secret" in Settings and encrypted with
+`secret.Box` when persisted. The frontend Settings page has a "Gateway edge TLS"
+panel that lists these keys one by one (with required/secret markers); clicking
+"Set" pre-fills a new value.
 
-推送链路：控制面 `GatewayTLSMonitor`（30s tick，`cfg.Gateway.Enabled` 时启用）读这些 Setting →
-`gatewayclient.PutTLSConfig` → gateway `PUT /-/tls`（`tls.update` 权限）→ `edgetls.Manager.Reconfigure`
-热更新。填齐必填项后，凭据在一个 tick 内（≤30s）生效。EAB 生成与阿里云 RAM AccessKey 的准备步骤同
-`agenda-caddy` README。
+Push path: the control plane's `GatewayTLSMonitor` (30s tick, enabled when
+`cfg.Gateway.Enabled`) reads these Settings → `gatewayclient.PutTLSConfig` →
+gateway `PUT /-/tls` (`tls.update` permission) → `edgetls.Manager.Reconfigure`
+hot-reload. Once the required items are filled in, the credentials take effect
+within one tick (≤30s). EAB generation and Aliyun RAM AccessKey preparation are
+the same steps as in the `agenda-caddy` README.
 
-## 托管哪些域名
+## Which domains get managed
 
-每个 reconcile 周期（默认 30s），托管域名集合 = `gateway.tls.static_domains`（Setting）
-**∪ 当前所有启用路由的 host**（`gateway_route.host`，跳过通配 `*`）。
+Every reconcile cycle (30s by default), the managed-domain set =
+`gateway.tls.static_domains` (Setting) **∪ the hosts of all currently enabled
+routes** (`gateway_route.host`, skipping the wildcard `*`).
 
-- **API / 前后端应用域名**：本来就是 gateway 路由，在应用的 **Routes tab** 填个 `host` 即可，
-  下一个周期自动纳入签发，无需额外配置。前端 Routes tab 的 Host 输入框已内置提示。
-- **非 agenda 托管的固定 upstream**（如原来 agenda-caddy 直连的裸容器）：gateway 只反代注册过的
-  路由，只把域名塞进 `gateway.tls.static_domains` 只会签到证书、但代理时 404（无匹配路由）。
-  正确做法是把它们也纳入 agenda 当 Application 部署，或在 Routes tab 建对应路由。
+- **API / frontend-and-backend app domains**: these are already gateway routes.
+  Just fill in a `host` in the app's **Routes tab** and it is picked up for
+  issuance on the next cycle — no extra configuration. The frontend Routes tab's
+  Host input already has an inline hint.
+- **Fixed upstreams not managed by agenda** (e.g. bare containers that
+  agenda-caddy used to proxy directly): the gateway only reverse-proxies
+  registered routes, so shoving a domain into `gateway.tls.static_domains` alone
+  will get a cert issued but 404 at proxy time (no matching route). The correct
+  approach is to bring them into agenda as a deployed Application, or create a
+  matching route in the Routes tab.
 
-> **首签窗口**：签发后台异步进行（DNS-01 传播可能要几分钟），不阻塞启动；新加域名在证书签好前
-> `:443` 握手会失败，属正常，等几分钟即可。续期全自动无感。
+> **First-issuance window**: issuance happens asynchronously in the background
+> (DNS-01 propagation can take a few minutes) and does not block startup. A newly
+> added domain's `:443` handshake will fail until its certificate is issued —
+> that is normal, just wait a few minutes. Renewal is fully automatic and
+> transparent.
 
-## 部署要点
+## Deployment notes
 
-- `agenda-gateway` 容器需发布 `443`（`EXPOSE 8080 443`），并把 `/data` 挂成**持久卷**
-  （证书/ACME 账户，误删可能触发 CA 速率限制）。
-- Caddy 和 gateway 不能同时绑定宿主机 `80/443`。切换前先停掉旧 `agenda-caddy`
-  （`docker compose -p <old-caddy-project> down`），再开启 gateway 的 `GATEWAY_TLS_ENABLED`。
-- 出站需要能连 `acme.zerossl.com` 和阿里云 DNS OpenAPI；镜像已带 `ca-certificates`。
+- The `agenda-gateway` container must publish `443` (`EXPOSE 8080 443`) and mount
+  `/data` as a **persistent volume** (certificates/ACME account; deleting it by
+  accident can trip CA rate limits).
+- Caddy and the gateway cannot both bind host `80/443` at once. Before switching,
+  stop the old `agenda-caddy` (`docker compose -p <old-caddy-project> down`),
+  then enable the gateway's `GATEWAY_TLS_ENABLED`.
+- Outbound connectivity to `acme.zerossl.com` and the Aliyun DNS OpenAPI is
+  required; the image already ships `ca-certificates`.
 
-## 已知边界（后续可迭代）
+## Known limitations (future iterations)
 
-- CertMagic v0.25 无 `Unmanage`：某个 host 从路由删掉后，其证书会留在缓存并继续续期，直到进程重启。对"只增不减"的边缘无害。
-- 证书存储用 `FileStorage`（单节点持久卷），与旧 Caddy 一致；多副本共享存储（MySQL Storage + 分布式锁）是后续 HA 项。
-- 证书到期 metric / 告警暂未接入，可在 `edgetls` 增加 gauge 后复用现有 AlertService。
+- CertMagic v0.25 has no `Unmanage`: once a host is removed from a route, its
+  certificate stays in the cache and keeps renewing until the process restarts.
+  Harmless for an "add-only" edge.
+- Certificate storage uses `FileStorage` (single-node persistent volume), same as
+  the old Caddy; shared storage across replicas (MySQL Storage + distributed
+  lock) is a future HA item.
+- Certificate-expiry metrics / alerts are not wired up yet; add a gauge in
+  `edgetls` and reuse the existing AlertService.

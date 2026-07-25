@@ -1,0 +1,29 @@
+# gitleaks config for agenda-v2. Extends the built-in default ruleset (which
+# already covers AWS/GCP/GitHub/Slack/JWT/private-key/etc.) and adds a narrow
+# allowlist for the intentional placeholders in *.example templates and docs.
+#
+# Manual full-history scan:
+#   gitleaks detect --source . --log-opts="--all" -v
+# Runs automatically on staged changes via .pre-commit-config.yaml.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional placeholders in templates/docs are not real secrets."
+
+# Example/template files exist to hold fill-in-the-blank placeholders. Real
+# secrets never live here (they go to gitignored config/.env at deploy time).
+paths = [
+  '''.*\.example\.ya?ml$''',
+  '''.*\.env\.example$''',
+  '''config/agenda-v2\.example\.yaml''',
+  '''cmd/agenda-node/agenda-node\.example\.yaml''',
+]
+
+# Specific placeholder strings that appear in committed docs/templates.
+regexes = [
+  '''ghp_xxx''',
+  '''replace-with-random-secret''',
+  '''user:password@''',
+]

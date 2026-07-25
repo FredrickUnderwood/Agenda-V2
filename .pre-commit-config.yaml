@@ -1,0 +1,37 @@
+# Pre-commit hooks for agenda-v2. Blocks secrets and common hygiene issues
+# from ever entering git history.
+#
+# Prerequisite — install gitleaks once (the secret-scan hook calls the system
+# binary directly, so there is no per-clone recompile via the Go module proxy):
+#   brew install gitleaks                         # macOS / Linuxbrew
+#   # or grab a release binary: https://github.com/gitleaks/gitleaks/releases
+#
+# One-time setup per clone:
+#   pipx install pre-commit    # or: pip install --user pre-commit
+#   pre-commit install         # installs the git hook into .git/hooks
+#
+# Scan everything on demand:
+#   pre-commit run --all-files
+repos:
+  # Secret scanner. Uses the locally-installed gitleaks binary (language:
+  # system) rather than the upstream language:golang hook, which recompiles
+  # gitleaks from source on every clone through the Go proxy — unreliable on
+  # restricted networks. Ruleset + allowlist come from .gitleaks.toml.
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (secret scan, staged)
+        entry: gitleaks git --staged --redact --verbose
+        language: system
+        pass_filenames: false
+
+  # Cheap, high-signal hygiene checks (provisioned from PyPI).
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key           # belt-and-suspenders vs. committing PEM keys
+      - id: check-added-large-files       # stop accidental DB dumps / binaries
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict          # no stray <<<<<<< markers
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
