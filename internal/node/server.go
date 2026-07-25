@@ -160,10 +160,13 @@ const (
 )
 
 // getLogs reads log files from the given host-side directory (the "dir"
-// query param — the same absolute path the control plane already resolves
-// for job dispatch as NodeJobRequest.Dir, joined with "logs"; NOT
-// contract.AgendaContainerLogDir, which is only the in-container path a
-// deployed app's own container sees, not the host path this process runs on).
+// query param — an absolute host path the control plane resolves as the
+// instance's runtime log dir, git.InstanceLogDir →
+// <root>/run/<app>/<env>/<instance>/logs, or the legacy
+// <root>/<host>/<repo>/<branch>/logs for instances deployed before that
+// layout; NOT contract.AgendaContainerLogDir, which is only the in-container
+// path a deployed app's own container sees, not the host path this process
+// runs on).
 func (s *Server) getLogs(c *gin.Context) {
 	app := c.Param("app")
 	instance := c.Param("instance")

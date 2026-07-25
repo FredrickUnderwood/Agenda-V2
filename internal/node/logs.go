@@ -18,6 +18,12 @@ const maxTailReadBytes = 2 << 20 // 2MB
 // the naming scheme sdk/go/log's file sink uses (see AGENDA_INSTANCE_NAME /
 // AGENDA_SERVICE_NAME / AGENDA_REPLICA_ID). Replicas of one scaled service each
 // write their own file, so a prefix match (not an exact name) is required.
+//
+// The per-instance run dir (<root>/run/<app>/<env>/<instance>/logs) holds only
+// this instance's files, so the app/instance prefix is redundant there — but
+// the legacy layout co-located every instance of an app/branch in one shared
+// logs dir, so the prefix filter is kept to avoid returning another instance's
+// logs when reading that shared directory.
 func findLogFiles(dir, app, instance string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

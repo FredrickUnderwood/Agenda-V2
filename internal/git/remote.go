@@ -14,6 +14,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
 
 // FetchRemoteSHA returns the current commit SHA of the given branch.
@@ -206,29 +207,82 @@ func redactTokens(s string, cfg *config.Config) string {
 // expandTilde controls whether a leading "~" in root is resolved against the
 // controller's HOME; pass true only for local execution.
 func ResolveLocalPath(repoURL, branch, root string, expandTilde bool) (string, error) {
-	if root == "" {
-		return "", errors.New("workspace_root is empty; configure it on the machine (or globally in agenda-v2.yaml)")
-	}
 	if branch == "" {
 		return "", errors.New("branch is empty")
 	}
-	if strings.HasPrefix(root, "~") {
-		if !expandTilde {
-			return "", errors.New("workspace_root must be an absolute path for remote machines (no ~ expansion over SSH)")
-		}
-		var err error
-		root, err = expandHome(root)
-		if err != nil {
-			return "", err
-		}
-	} else if !filepath.IsAbs(root) {
-		return "", errors.New("workspace_root must be an absolute path (e.g. /root/.agenda-v2/workspaces); relative paths produce ambiguous physical locations")
+	root, err := resolveWorkspaceRoot(root, expandTilde)
+	if err != nil {
+		return "", err
 	}
 	host, repoPath, err := normalizeRepoURL(repoURL)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, host, repoPath, branch), nil
+}
+
+// runSubtree is the fixed subdirectory under the workspace root that holds
+// per-instance runtime state (logs, build artifacts) — kept separate from the
+// per-branch code checkouts (which live at <root>/<host>/<repo>/<branch>) so a
+// re-clone (rm -rf of a checkout) can never wipe an instance's logs, and so the
+// path is keyed on the stable (app, env, instance) identity rather than the
+// volatile branch. See InstanceLogDir.
+const runSubtree = "run"
+
+// ResolveInstanceRunDir derives the on-machine runtime working directory for a
+// single deployable instance, rooted at the configured workspace root:
+// <root>/run/<app>/<env>/<instance>. Unlike ResolveLocalPath it deliberately
+// does NOT include the branch: both the deploy (which bind-mounts the log dir
+// into the container) and the log reader must resolve the same path for a given
+// instance regardless of which branch/release is currently running on it.
+//
+// app/env/instance are slugged for filesystem safety; app is operator-supplied
+// so it in particular must be normalized.
+func ResolveInstanceRunDir(root, app, env, instance string, expandTilde bool) (string, error) {
+	root, err := resolveWorkspaceRoot(root, expandTilde)
+	if err != nil {
+		return "", err
+	}
+	if app == "" {
+		return "", errors.New("app is empty")
+	}
+	if instance == "" {
+		// Mirror domain.DefaultInstanceName without importing domain into this
+		// low-level path helper; callers normally pass an already-normalized name.
+		instance = "default"
+	}
+	return filepath.Join(root, runSubtree, util.Slug(app), util.Slug(env), util.Slug(instance)), nil
+}
+
+// InstanceLogDir is the "logs" subdirectory of an instance's run dir — the host
+// directory bind-mounted onto contract.AgendaContainerLogDir in each of the
+// instance's containers, and the directory the node tails on a log request.
+func InstanceLogDir(root, app, env, instance string, expandTilde bool) (string, error) {
+	runDir, err := ResolveInstanceRunDir(root, app, env, instance, expandTilde)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(runDir, "logs"), nil
+}
+
+// resolveWorkspaceRoot validates the configured workspace root and expands a
+// leading "~" against the controller's HOME when expandTilde is set (local
+// execution only — remote machines must use absolute paths, since ~ would
+// expand on the wrong host over SSH).
+func resolveWorkspaceRoot(root string, expandTilde bool) (string, error) {
+	if root == "" {
+		return "", errors.New("workspace_root is empty; configure it on the machine (or globally in agenda-v2.yaml)")
+	}
+	if strings.HasPrefix(root, "~") {
+		if !expandTilde {
+			return "", errors.New("workspace_root must be an absolute path for remote machines (no ~ expansion over SSH)")
+		}
+		return expandHome(root)
+	}
+	if !filepath.IsAbs(root) {
+		return "", errors.New("workspace_root must be an absolute path (e.g. /root/.agenda-v2/workspaces); relative paths produce ambiguous physical locations")
+	}
+	return root, nil
 }
 
 func expandHome(p string) (string, error) {

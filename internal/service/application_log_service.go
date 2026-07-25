@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/git"
@@ -46,9 +47,17 @@ func NewApplicationLogService(
 	return &ApplicationLogService{apps: apps, targets: targets, releases: releases, machines: machines, workspaceRoot: workspaceRoot}
 }
 
-// GetInstanceLogs resolves targetID's machine and current release branch,
-// then asks that machine's agenda-node agent to tail the logs. service ==
-// ""  returns every service's log file; tail <= 0 leaves the node's default.
+// GetInstanceLogs resolves targetID's machine, then asks that machine's
+// agenda-node agent to tail the instance's logs. service == "" returns every
+// service's log file; tail <= 0 leaves the node's default.
+//
+// The log directory is resolved from the stable (app, env, instance) identity
+// (git.InstanceLogDir → <root>/run/<app>/<env>/<instance>/logs), NOT from any
+// release branch: the running container writes there regardless of which branch
+// or verify state it's in, so a freshly-deployed, not-yet-verified candidate
+// (e.g. a blue/green slot mid-rollout) still shows logs. For instances deployed
+// before the run/ layout existed, it falls back to the legacy per-branch path
+// under the code checkout.
 func (s *ApplicationLogService) GetInstanceLogs(ctx context.Context, appID, targetID int64, service string, tail int) (*contract.NodeLogsResponse, error) {
 	target, err := s.targets.GetByID(ctx, targetID)
 	if err != nil {
@@ -73,23 +82,45 @@ func (s *ApplicationLogService) GetInstanceLogs(ctx context.Context, appID, targ
 		return nil, errors.New("machine is not in agent mode; log reading requires agenda-node")
 	}
 
-	release, err := s.releases.GetLatestVerified(ctx, appID, target.Env, target.InstanceName)
-	if err != nil {
-		return nil, err
-	}
-	if release == nil {
-		return nil, errors.New("no verified release found for this instance")
-	}
-
 	root := mc.WorkspaceRoot
 	if root == "" {
 		root = s.workspaceRoot
 	}
-	localPath, err := git.ResolveLocalPath(app.RepoURL, release.Branch, root, mc.IsLocal())
+	logDir, err := git.InstanceLogDir(root, app.Name, string(target.Env), target.InstanceName, mc.IsLocal())
 	if err != nil {
 		return nil, err
 	}
-	logDir := filepath.Join(localPath, "logs")
 
-	return nodeproxy.FetchLogs(ctx, mc.AgentBaseURL, mc.AgentToken, app.Name, target.InstanceName, logDir, service, tail)
+	resp, err := nodeproxy.FetchLogs(ctx, mc.AgentBaseURL, mc.AgentToken, app.Name, target.InstanceName, logDir, service, tail)
+	if err == nil {
+		return resp, nil
+	}
+
+	// Back-compat: instances deployed before the run/ layout wrote their logs
+	// under the code checkout at <root>/<host>/<repo>/<branch>/logs. Try that,
+	// keyed on the latest verified release's branch, before surfacing the error.
+	if legacy := s.legacyInstanceLogs(ctx, appID, app, target, mc, root, service, tail); legacy != nil {
+		return legacy, nil
+	}
+	return nil, err
+}
+
+// legacyInstanceLogs resolves logs from the pre-run/ layout (logs living inside
+// the branch-specific code checkout). Returns nil when there's no verified
+// release to derive a branch from, or the legacy fetch fails — the caller then
+// surfaces the primary (new-path) error.
+func (s *ApplicationLogService) legacyInstanceLogs(ctx context.Context, appID int64, app *domain.Application, target *domain.ApplicationEnvTarget, mc *config.MachineConfig, root, service string, tail int) *contract.NodeLogsResponse {
+	release, err := s.releases.GetLatestVerified(ctx, appID, target.Env, target.InstanceName)
+	if err != nil || release == nil {
+		return nil
+	}
+	localPath, err := git.ResolveLocalPath(app.RepoURL, release.Branch, root, mc.IsLocal())
+	if err != nil {
+		return nil
+	}
+	resp, err := nodeproxy.FetchLogs(ctx, mc.AgentBaseURL, mc.AgentToken, app.Name, target.InstanceName, filepath.Join(localPath, "logs"), service, tail)
+	if err != nil {
+		return nil
+	}
+	return resp
 }

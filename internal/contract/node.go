@@ -49,9 +49,10 @@ type NodeHeartbeatRequest struct {
 
 // AgendaContainerLogDir is the in-container log directory that sdk/go/log
 // reads from AGENDA_LOG_DIR. The control plane's compose-override step
-// (internal/pipeline) mounts <LocalPath>/logs onto this path on the deploy
-// target's machine, and agenda-node's log-tail endpoint reads from the same
-// path — defined once here so the two ends can't drift.
+// (internal/pipeline) mounts the instance's runtime log dir
+// (git.InstanceLogDir → <root>/run/<app>/<env>/<instance>/logs) onto this path
+// on the deploy target's machine, and agenda-node's log-tail endpoint reads
+// from the same host path — defined once here so the two ends can't drift.
 const AgendaContainerLogDir = "/var/log/agenda"
 
 // AgendaContainerMetricsAddr is the fixed in-container listen address

@@ -51,7 +51,8 @@ func (s *ComposePullStep) Execute(ctx context.Context, rc *RunContext) error {
 // -d --build --remove-orphans [services...]`.
 //
 // Before invoking compose, it writes an agenda-managed override file
-// (<LocalPath>/.agenda/compose.override.yml) that mounts <LocalPath>/logs
+// (<LocalPath>/.agenda/compose.override.yml) that mounts this instance's
+// runtime log dir (LogDir, an absolute host path outside the code checkout)
 // into each target service at /var/log/agenda and injects
 // AGENDA_APP_NAME / AGENDA_LOG_DIR / AGENDA_REPO_BRANCH / AGENDA_INSTANCE_NAME
 // / AGENDA_SERVICE_NAME plus the merged (application < env < instance) user
@@ -69,6 +70,13 @@ type ComposeUpStep struct {
 	Branch       string
 	InstanceName string
 
+	// LogDir is the absolute host path of this instance's runtime log directory
+	// (git.InstanceLogDir → <root>/run/<app>/<env>/<instance>/logs). It is
+	// created on the target and bind-mounted onto /var/log/agenda in every
+	// augmented service, so it lives outside the code checkout and is keyed on
+	// the stable (app, env, instance) identity rather than the branch.
+	LogDir string
+
 	// Env is the fully merged env var map (application baseline < env-level
 	// override < instance-level override) baked into the override file.
 	Env map[string]string
@@ -81,7 +89,7 @@ func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
 	}
 	overridePath, err := writeAgendaOverride(
 		ctx, s.Machine,
-		rc.LocalPath, s.ComposeFile, s.WorkDir,
+		rc.LocalPath, s.ComposeFile, s.WorkDir, s.LogDir,
 		s.AppName, s.Branch, s.InstanceName, metricsAddr,
 		s.Services,
 		s.Env,

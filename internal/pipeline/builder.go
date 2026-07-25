@@ -74,6 +74,10 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 	if err != nil {
 		return nil, "", err
 	}
+	logDir, err := b.resolveInstanceLogDir(target, machine)
+	if err != nil {
+		return nil, "", err
+	}
 	composeFile := dockerCfg.ComposeFile
 	if composeFile == "" {
 		composeFile = "docker-compose.yml"
@@ -114,7 +118,8 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 			Machine: machine, WorkDir: dockerCfg.WorkDir, ComposeFile: composeFile,
 			ProjectName: projectName, Port: port, MetricsPort: metricsPort, Services: dockerCfg.Services,
 			AppName: target.App.Name, Branch: target.Branch, InstanceName: targetInstanceName(target),
-			Env: mergedEnv,
+			LogDir: logDir,
+			Env:    mergedEnv,
 		},
 	})
 	if composeHealthCheckEnabled(dockerCfg) {
@@ -199,6 +204,22 @@ func (b *Builder) resolveLocalPath(target *domain.DeployTarget, machine *config.
 		root = b.cfg.WorkspaceRoot
 	}
 	return git.ResolveLocalPath(target.App.RepoURL, target.Branch, root, machine.IsLocal())
+}
+
+// resolveInstanceLogDir picks the same workspace root as resolveLocalPath but
+// derives the per-instance runtime log directory
+// (<root>/run/<app>/<env>/<instance>/logs) instead of the code checkout. It is
+// deliberately branch-independent so the deploy's bind-mount and the log
+// reader resolve to the same directory regardless of which branch is running.
+func (b *Builder) resolveInstanceLogDir(target *domain.DeployTarget, machine *config.MachineConfig) (string, error) {
+	root := ""
+	if machine != nil {
+		root = machine.WorkspaceRoot
+	}
+	if root == "" {
+		root = b.cfg.WorkspaceRoot
+	}
+	return git.InstanceLogDir(root, target.App.Name, string(target.Env()), targetInstanceName(target), machine.IsLocal())
 }
 
 // resolveDockerMachine: DB-managed machine (by ID, from the env target) →
