@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// Notification is one entry in the platform's shared in-app inbox ("站内信").
+// Notification is one entry in the platform's shared in-app inbox.
 // It is a single, team-shared list — there is no per-user scoping or
 // per-user read-state anywhere else in this domain model, so IsRead is a
 // plain shared flag: whoever reads a notification marks it read for

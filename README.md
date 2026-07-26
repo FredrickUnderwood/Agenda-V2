@@ -1,9 +1,36 @@
-# agenda-v2
+<div align="center">
 
-A self-hostable DevOps platform in a single monorepo: deploy your services to
-your own machines, route traffic through a built-in gateway, and get logs,
-metrics, dashboards, and alerting out of the box — with a first-party Go SDK so
-your apps plug straight in.
+# Agenda-V2
+
+### Dev infrastructure designed for Vibe Coders
+
+**Deploy, monitor, log, route, and secure production apps — on your own servers, with your data in your own hands.**
+
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg?logo=go&logoColor=white)](go.mod)
+[![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-yes-brightgreen.svg)](#quickstart-single-host)
+
+</div>
+
+---
+
+You don't need a computer-science degree — or Vercel, Supabase, and a stack of SaaS
+bills — to run real software. **Agenda-V2** gives you the same deployment,
+observability, gateway, and secrets infrastructure that engineering teams rely on,
+packaged so you can stand it up yourself and run **production-grade, split
+frontend + backend apps** on machines *you* control.
+
+- 🚀 **Ship like a team of ten** — push a git repo + a `docker-compose.yml`, and the
+  platform builds, releases, health-checks, and routes it for you.
+- 🔒 **Own your data** — everything runs on your servers. No third-party dashboards
+  holding your logs, your metrics, or your users.
+- 🧰 **Batteries included** — logs, monitoring, dashboards, an edge gateway with
+  automatic HTTPS, encrypted secrets, and alerting to Feishu / DingTalk / WeCom /
+  Slack, all out of the box.
+- 🤖 **Made for AI-assisted builders** — a first-party SDK your apps plug straight
+  into, plus a bundled Claude Code skill so your assistant already knows how to
+  deploy and instrument on the platform.
 
 > **Status:** actively developed, pre-1.0. APIs and schema may still change.
 > Licensed under [AGPL-3.0](LICENSE).
@@ -67,6 +94,14 @@ The admin username/password generated on first run are printed at the end of
 setup, provision `agenda-node` on each target host and add machines through the
 web console.
 
+## Deploy your own app
+
+Building an app to host *on* agenda? You deliver a git repo + a `docker-compose.yml`
+and integrate the SDK. The bundled Claude Code skill
+[`.claude/skills/agenda-app-dev`](.claude/skills/agenda-app-dev/SKILL.md) documents
+the full contract — env vars the platform injects, the Gin/React skeletons,
+service-to-service calls through the gateway, logging, metrics, and alerting.
+
 ## Configuration
 
 Copy the template and fill in the blanks (or let `deploy.sh` render it for you):
@@ -106,6 +141,10 @@ brew install gitleaks            # or a release binary
 pipx install pre-commit          # or: pip install --user pre-commit
 pre-commit install
 ```
+
+## Security
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 

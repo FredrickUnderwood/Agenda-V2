@@ -1,58 +1,82 @@
 ---
 name: agenda-app-dev
-description: "在 agenda-v2（开源自托管 DevOps 平台）上开发并托管 Gin + React 应用的开发指南技能。当用户要把一个 Gin 后端或 React 前端部署到 agenda、接入 agenda-v2 第一方 SDK（github.com/FredrickUnderwood/agenda-v2/sdk/go 的 log / metric / alert）、写让 agenda 托管的 docker-compose、经 agenda-gateway 做服务间调用、在 agenda 控制台看日志 / 监控 / Grafana、自定义 Prometheus 打点、配置 PromQL 告警规则（AlertRule）或在业务代码里调用 SDK 发告警（飞书 / 钉钉 / 企微 / Slack / 自定义 Webhook）、看站内信时触发；也用于问'agenda 怎么部署应用'、'agenda 日志 / 指标怎么接'、'agenda 服务之间怎么调用'、'怎么在 agenda 上告警 / 打点'。注意区分：这是 agenda-v2 开源自托管平台（monorepo + 第一方 SDK + 内置 auth），不是老的 agenda-go-sdk / user-core-go-sdk / 独立 agenda-gateway 仓库 / agenda-fe 内部体系（那套用 rd-standards + docker-dev）。不用于纯排查或与 agenda 托管无关的一次性脚本。"
+description: "Guide for developing and hosting Gin + React apps on agenda-v2 (the open-source, self-hostable DevOps platform). Triggers when the user wants to deploy a Gin backend or React frontend to agenda, integrate the agenda-v2 first-party SDK (log / metric / alert under github.com/FredrickUnderwood/agenda-v2/sdk/go), write an agenda-hosted docker-compose, make service-to-service calls through agenda-gateway, view logs / monitoring / Grafana in the agenda console, add custom Prometheus instrumentation, configure PromQL alert rules (AlertRule), send alerts from business code via the SDK (Feishu / DingTalk / WeCom / Slack / custom webhook), or read the in-app inbox; also for questions like 'how do I deploy an app on agenda', 'how do I wire up agenda logs / metrics', 'how do services call each other on agenda', 'how do I alert / instrument on agenda'. Note the distinction: this is the agenda-v2 open-source self-hosted platform (monorepo + first-party SDK + built-in auth), NOT the old agenda-go-sdk / user-core-go-sdk / standalone agenda-gateway repo / agenda-fe internal stack (which uses rd-standards + docker-dev). Not for pure troubleshooting or one-off scripts unrelated to agenda hosting."
 ---
 
-# 在 agenda-v2 上开发托管 Gin + React 应用
+# Developing and hosting Gin + React apps on agenda-v2
 
-面向：把一个 **Gin 后端 + React 前端** 交给 **agenda-v2**（开源、自托管的 DevOps 平台）托管，并接入它的部署 / 日志 / 监控 / 网关 / 打点 / 告警能力。所有约定来自 agenda-v2 代码现状（`sdk/go`、`internal/pipeline`、`internal/gateway`、`internal/service`）。
+For: handing a **Gin backend + React frontend** to **agenda-v2** (the open-source,
+self-hostable DevOps platform) to host, and wiring it into the platform's deploy /
+logging / monitoring / gateway / instrumentation / alerting capabilities. Every
+convention here comes from the current agenda-v2 code (`sdk/go`,
+`internal/pipeline`, `internal/gateway`, `internal/service`).
 
-## 0. 先分清是哪套体系（关键）
+## 0. First, tell which stack you're on (important)
 
-| | **本 skill：agenda-v2 开源平台** | 老内部体系（用 rd-standards + docker-dev） |
+| | **This skill: agenda-v2 open-source platform** | Old internal stack (uses rd-standards + docker-dev) |
 |---|---|---|
-| SDK import | `github.com/FredrickUnderwood/agenda-v2/sdk/go/{log,metric,alert}` | `agenda-go-sdk/log`、`user-core-go-sdk` |
-| 身份 / 权限 | 平台内置 auth（HMAC JWT，admin/member），**应用侧一般不接** | `user-core-go-sdk` RequirePerm + 前端 hasPerm |
-| 网关 | monorepo 内 `agenda-gateway`（`cmd/agenda-gateway`），动态路由 | 独立 `agenda-gateway` 仓库 |
-| 前端 | 你自己的 React（Vite/CRA 皆可），静态托管；`web/` 是平台自己的控制台，不是你的 app | `agenda-fe` 换皮 |
+| SDK import | `github.com/FredrickUnderwood/agenda-v2/sdk/go/{log,metric,alert}` | `agenda-go-sdk/log`, `user-core-go-sdk` |
+| Identity / permissions | platform built-in auth (HMAC JWT, admin/member); **app side usually doesn't integrate it** | `user-core-go-sdk` RequirePerm + frontend hasPerm |
+| Gateway | in-monorepo `agenda-gateway` (`cmd/agenda-gateway`), dynamic routing | standalone `agenda-gateway` repo |
+| Frontend | your own React (Vite/CRA both fine), statically hosted; `web/` is the platform's own console, NOT your app | `agenda-fe` reskin |
 
-判断：import 路径带 `agenda-v2/sdk/go` 或用户说"agenda-v2 / 自托管 / 开源平台 / 控制台里创建应用"→ 用本 skill。否则用 rd-standards + docker-dev。通用的 Dockerfile / compose / 国内 registry mirror 写法仍看 **docker-dev**，本 skill 只讲 agenda-v2 特有的接入契约。
+How to decide: an import path containing `agenda-v2/sdk/go`, or the user saying
+"agenda-v2 / self-hosted / open-source platform / create an application in the
+console" → use this skill. Otherwise use rd-standards + docker-dev. Generic
+Dockerfile / compose / China registry-mirror conventions are still in
+**docker-dev**; this skill only covers the agenda-v2-specific integration contract.
 
-## 1. 平台拓扑与"开发者契约"
+## 1. Platform topology and the "developer contract"
 
 ```
-Client ──▶ gateway:8081 ──▶ node:7200/i/<instance> ──▶ 你的实例容器(:APP_PORT)
+Client ──▶ gateway:8081 ──▶ node:7200/i/<instance> ──▶ your instance container(:APP_PORT)
                                         ▲
-control-plane(API+编排) ── 只经 node 中转触达实例端口（日志 / 指标 / 健康）
+control-plane(API+orchestration) ── reaches instance ports only via the node relay (logs / metrics / health)
 ```
 
-三个二进制：**control-plane**（`cmd/agenda-v2`，Web API + 部署编排大脑）、**gateway**（`cmd/agenda-gateway`，公网入口 + 动态反代 + 埋点）、**node**（`cmd/agenda-node`，常驻每台机器的 agent，执行部署 + 采日志 / 指标 + 本地反代）。
+Three binaries: **control-plane** (`cmd/agenda-v2`, the Web API + deploy
+orchestration brain), **gateway** (`cmd/agenda-gateway`, public entry + dynamic
+reverse proxy + instrumentation), **node** (`cmd/agenda-node`, the resident
+per-machine agent that runs deploys + collects logs / metrics + does local reverse
+proxy).
 
-**你（应用作者）只需要交付：一个 git 仓库 + 一个 `docker-compose.yml`。** 平台在部署时会：clone/checkout → 注入一个 override compose（挂日志目录 + 注入 `AGENDA_*` 环境变量）→ `docker compose up -d --build` → 健康检查 → 同步网关路由。
+**You (the app author) only need to deliver: one git repo + one
+`docker-compose.yml`.** At deploy time the platform will: clone/checkout → inject an
+override compose (mounting the log directory + injecting `AGENDA_*` env vars) →
+`docker compose up -d --build` → health check → sync gateway routes.
 
-### 平台注入的环境变量（你不要自己设，直接读）
+### Environment variables the platform injects (don't set these yourself, just read them)
 
-部署时平台生成 `.agenda/compose.override.yml`，给每个 service 注入：
+At deploy time the platform generates `.agenda/compose.override.yml`, injecting into
+each service:
 
-| 变量 | 值 | SDK 用途 |
+| Variable | Value | SDK use |
 |---|---|---|
-| `AGENDA_APP_NAME` | Application 名 | 日志 `app` 字段 / 指标 `agenda_app` 常量标签 |
-| `AGENDA_LOG_DIR` | `/var/log/agenda`（容器内，已自动挂载宿主机卷） | 日志文件落盘目录 |
-| `AGENDA_ENV` | 环境（prod/test…） | 日志 `env` 字段 |
-| `AGENDA_INSTANCE_NAME` | 实例名（default/blue/green…） | 日志 `instance` 字段 / 文件名 / 指标 `agenda_instance` |
-| `AGENDA_SERVICE_NAME` | **compose service 名**（不是 app 名！） | 日志 `service` 字段 / 文件名 / 指标 `agenda_service` |
-| `AGENDA_REPO_BRANCH` | 本次发布分支 | 可选，自行使用 |
-| `AGENDA_METRICS_ADDR` | `:9464`（仅当该实例开启 metrics 时注入） | `sdk/go/metric` 监听地址 |
+| `AGENDA_APP_NAME` | Application name | log `app` field / metric `agenda_app` constant label |
+| `AGENDA_LOG_DIR` | `/var/log/agenda` (in-container, host volume auto-mounted) | log file output directory |
+| `AGENDA_ENV` | environment (prod/test…) | log `env` field |
+| `AGENDA_INSTANCE_NAME` | instance name (default/blue/green…) | log `instance` field / filename / metric `agenda_instance` |
+| `AGENDA_SERVICE_NAME` | **compose service name** (not the app name!) | log `service` field / filename / metric `agenda_service` |
+| `AGENDA_REPO_BRANCH` | the branch of this release | optional, use as you like |
+| `AGENDA_METRICS_ADDR` | `:9464` (injected only when metrics is enabled for this instance) | `sdk/go/metric` listen address |
 
-> 日志身份字段是 `log.Init` 自动挂的常驻字段——你**什么都不用做**，每行日志自动带 `app`/`service`/`env`/`instance`。`trace_id` 见 §5（需一行中间件）。
+> The log identity fields are resident fields attached automatically by `log.Init`
+> — you **do nothing**, every log line automatically carries
+> `app`/`service`/`env`/`instance`. `trace_id` is in §5 (needs one middleware line).
 
-同时给 `docker compose up` 传 shell 环境变量供 compose 插值：`APP_PORT`（实例端口）、`APP_METRICS_PORT`（开 metrics 时）。**注意**：以 `AGENDA_` 开头的用户自定义 env 会被平台**丢弃**（防止你破坏 SDK 契约）。你的业务 env 用别的前缀。
+It also passes shell env vars to `docker compose up` for compose interpolation:
+`APP_PORT` (instance port), `APP_METRICS_PORT` (when metrics is on). **Note**:
+user-defined env vars starting with `AGENDA_` are **discarded** by the platform (to
+stop you breaking the SDK contract). Use a different prefix for your business env.
 
-用户自定义 env 三层合并（后者覆盖前者）：应用级 `DeployConfig.env` < 环境级 `ApplicationEnvironment.EnvVars` < 实例级 `ApplicationEnvTarget.EnvOverride`。
+User-defined env merges in three layers (later overrides earlier): app-level
+`DeployConfig.env` < env-level `ApplicationEnvironment.EnvVars` < instance-level
+`ApplicationEnvTarget.EnvOverride`.
 
-## 2. Gin 后端骨架（main.go）
+## 2. Gin backend skeleton (main.go)
 
-依赖（应用自己的 `go.mod`，SDK 是独立 module，不拖平台依赖）：
+Dependency (your app's own `go.mod`; the SDK is a standalone module and doesn't
+drag in platform deps):
 
 ```
 go get github.com/FredrickUnderwood/agenda-v2/sdk/go
@@ -80,22 +104,23 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/sdk/go/metric/ginmetric"
 )
 
-// 自定义业务指标(打点)必须声明为【包级 var】：注册发生在 var-init 阶段，
-// 早于 main()，也早于 metric.Init。放进函数里注册会晚于 Init 而丢失。
+// Custom business metrics (instrumentation) MUST be declared as [package-level var]:
+// registration happens during var-init, before main() and before metric.Init.
+// Registering inside a function runs after Init and gets lost.
 var ordersFailed = metric.NewCounterVec(prometheus.CounterOpts{
 	Name: "orders_failed_total",
 	Help: "Failed orders, by reason.",
 }, []string{"reason"})
 
 func main() {
-	// 1) 日志：AGENDA_* 由平台注入；本地不填也能跑（只写 stderr）。
+	// 1) Logging: AGENDA_* is injected by the platform; runs locally without them too (writes stderr only).
 	if err := log.Init(log.Config{Level: "info"}); err != nil {
 		panic(err)
 	}
 	defer log.Shutdown()
 
-	// 2) 指标：开了 metrics 时平台注入 AGENDA_METRICS_ADDR=:9464，Init 会起
-	//    一个独立 /metrics 监听；没开就是 no-op（指标仍注册，只是不对外服务）。
+	// 2) Metrics: when metrics is on, the platform injects AGENDA_METRICS_ADDR=:9464 and Init starts
+	//    a dedicated /metrics listener; when off it's a no-op (metrics still register, just not served).
 	if err := metric.Init(metric.Config{}); err != nil {
 		log.Error(context.Background(), "metric init failed", zap.Error(err))
 	}
@@ -107,15 +132,15 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(ginlog.Middleware())    // 复用/生成 X-Agenda-Trace-Id -> 每行日志自动带 trace_id，响应回写
-	r.Use(ginmetric.Middleware()) // 自动 http_requests_total / http_request_duration_seconds
+	r.Use(ginlog.Middleware())    // reuse/generate X-Agenda-Trace-Id -> every log line auto-carries trace_id, echoed on the response
+	r.Use(ginmetric.Middleware()) // automatic http_requests_total / http_request_duration_seconds
 
-	// 健康检查端点：ApplicationEnvTarget 默认探 GET /healthz 期望 200。
+	// Health-check endpoint: ApplicationEnvTarget probes GET /healthz expecting 200 by default.
 	r.GET("/healthz", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
 	r.GET("/orders/:id", func(c *gin.Context) {
 		if err := doWork(c); err != nil {
-			ordersFailed.WithLabelValues("db").Inc() // 打点
+			ordersFailed.WithLabelValues("db").Inc() // instrumentation
 			log.Error(c.Request.Context(), "order failed", zap.String("id", c.Param("id")), zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
 			return
@@ -123,7 +148,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"id": c.Param("id")})
 	})
 
-	// 3) 优雅退出（让 SDK flush 日志 / 关 metrics 监听）。
+	// 3) Graceful shutdown (let the SDK flush logs / close the metrics listener).
 	srv := &http.Server{Addr: ":8080", Handler: r}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -141,142 +166,209 @@ func main() {
 }
 ```
 
-要点：
-- **日志一律走 `sdk/go/log`**（`log.Info/Warn/Error/Debug(ctx, msg, zap.Field...)`），不要裸 `fmt.Print` / `log.Print`。它同时写 stderr（`docker logs`）和 `/var/log/agenda/<app>__<instance>__<service>.log`（控制台读的就是这个文件）。每行自动带 `app`/`service`/`env`/`instance`（`log.Init` 常驻字段），加了 `ginlog.Middleware()` 后还带 `trace_id`——传 `ctx`（gin 用 `c.Request.Context()`）就行。
-- 容器内监听端口（示例 `:8080`）要和 compose 里 `${APP_PORT}` 映射的容器侧端口一致。
-- Metrics 监听固定 `:9464`（`AGENDA_METRICS_ADDR`），compose 把它发布成 `${APP_METRICS_PORT}`。
-- 想把 `/metrics` 挂到自己主路由而不起第二个监听：用 `metric.Handler()`。但 agenda 的 node 抓取默认抓 `MetricsPort`（独立端口），**推荐用 `metric.Init` 的独立 `:9464` 监听**，最省事。
+Key points:
+- **Always log through `sdk/go/log`** (`log.Info/Warn/Error/Debug(ctx, msg, zap.Field...)`),
+  never bare `fmt.Print` / `log.Print`. It writes both stderr (`docker logs`) and
+  `/var/log/agenda/<app>__<instance>__<service>.log` (the file the console reads).
+  Every line auto-carries `app`/`service`/`env`/`instance` (`log.Init` resident
+  fields); with `ginlog.Middleware()` added it also carries `trace_id` — just pass
+  `ctx` (in gin, `c.Request.Context()`).
+- The in-container listen port (`:8080` in the example) must match the container-side
+  port mapped by `${APP_PORT}` in compose.
+- The metrics listener is fixed at `:9464` (`AGENDA_METRICS_ADDR`); compose publishes
+  it as `${APP_METRICS_PORT}`.
+- To mount `/metrics` on your own main router instead of a second listener: use
+  `metric.Handler()`. But agenda's node scrape defaults to `MetricsPort` (a dedicated
+  port), so **the dedicated `:9464` listener from `metric.Init` is recommended** —
+  least hassle.
 
-## 3. docker-compose.yml（agenda 托管约定）
+## 3. docker-compose.yml (agenda hosting conventions)
 
-单后端服务：
+Single backend service:
 
 ```yaml
 services:
   api:
-    build: ./api                      # 或 image: registry/xxx（Dockerfile 写法见 docker-dev）
+    build: ./api                      # or image: registry/xxx (Dockerfile conventions in docker-dev)
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-8080}:8080"          # 网关 / 健康检查经 host:APP_PORT 触达；容器侧 8080 与 main 一致
-      - "${APP_METRICS_PORT:-9464}:9464"  # 开 metrics 时 node 抓 host:APP_METRICS_PORT → 容器 :9464
-    # 不要自己写 AGENDA_* 环境变量，也不要手动挂 /var/log/agenda ——
-    # 平台的 .agenda/compose.override.yml 会自动注入 env + 挂日志卷。
-    # 业务 env（DB_DSN、下游服务地址等）通过控制台的 env 三层配置注入，别硬编码。
+      - "${APP_PORT:-8080}:8080"          # gateway / health check reach it via host:APP_PORT; container-side 8080 matches main
+      - "${APP_METRICS_PORT:-9464}:9464"  # when metrics is on, node scrapes host:APP_METRICS_PORT -> container :9464
+    # Do NOT write AGENDA_* env vars yourself, and do NOT manually mount /var/log/agenda —
+    # the platform's .agenda/compose.override.yml auto-injects env + mounts the log volume.
+    # Business env (DB_DSN, downstream service addresses, etc.) is injected via the console's
+    # three-layer env config; don't hard-code it.
 ```
 
-Gin + React 两种拓扑，**推荐拓扑 A**：
+Two topologies for Gin + React; **topology A recommended**:
 
-- **拓扑 A（推荐）：拆成两个 Application** —— `myapp-api`（Gin）和 `myapp-web`（React/nginx）。各自独立端口 / 路由 / 伸缩，指标与日志互不串。前端外部路由绑 host（如 `app.example.com`），后端可再给一条外部路由或只给 internal 路由供前端 / 其它服务调。
-- **拓扑 B（简单场景）：一个 compose 两个 service**，用前端 nginx 反代 `/api` 到后端（compose 网络内 `api:8080`），只有 web 服务吃 `APP_PORT` 对外。缺点：agenda 每个 target 只有一个 `Port` / 一个 `MetricsPort`，两个 service 的指标抓取无法各自独立，多副本伸缩也受限。
+- **Topology A (recommended): split into two Applications** — `myapp-api` (Gin) and
+  `myapp-web` (React/nginx). Each gets its own port / route / scaling, and their
+  metrics and logs don't bleed into each other. The frontend's external route binds a
+  host (e.g. `app.example.com`); the backend can get its own external route or just an
+  internal route for the frontend / other services to call.
+- **Topology B (simple cases): one compose, two services**, with the frontend nginx
+  reverse-proxying `/api` to the backend (`api:8080` inside the compose network); only
+  the web service takes `APP_PORT` externally. Downside: each agenda target has only
+  one `Port` / one `MetricsPort`, so the two services' metric scraping can't be
+  independent and multi-replica scaling is limited.
 
-React 前端（拓扑 A 的 `myapp-web`）：`npm run build` 出静态文件 → nginx 容器托管。
+React frontend (topology A's `myapp-web`): `npm run build` produces static files →
+nginx container serves them.
 
 ```yaml
 services:
   web:
-    build: ./web                       # 多阶段：node build → nginx 托 dist/
+    build: ./web                       # multi-stage: node build -> nginx serves dist/
     restart: unless-stopped
     ports:
       - "${APP_PORT:-80}:80"
 ```
 
-nginx 里让前端与 API 同源（把 `/api` 反代到后端的网关 internal 路由，避免 CORS）：
+In nginx, keep the frontend and API same-origin (reverse-proxy `/api` to the
+backend's internal gateway route, avoiding CORS):
 
 ```nginx
 location /api/ {
-    proxy_pass http://GATEWAY_HOST:8081/svc-myapp-api/;  # 见 §4 internal 路由
+    proxy_pass http://GATEWAY_HOST:8081/svc-myapp-api/;  # see §4 internal routes
 }
 location / {
-    try_files $uri /index.html;                          # SPA 路由回退
+    try_files $uri /index.html;                          # SPA route fallback
 }
 ```
 
-（`GATEWAY_HOST` 用构建期或 nginx 模板变量注入，别写死。）
+(Inject `GATEWAY_HOST` via a build-time or nginx template variable, don't hard-code it.)
 
-## 4. 经 agenda-gateway 做服务间调用
+## 4. Service-to-service calls through agenda-gateway
 
-网关按 **host + path** 反代，exact-host 优先于通配 `*`，同级最长路径优先。每个 Application 在控制台 **Routes Tab** 配路由；两类：
+The gateway reverse-proxies by **host + path**, exact-host beating the wildcard `*`,
+and the longest path winning at the same level. Each Application configures routes in
+the console **Routes Tab**; two kinds:
 
-- **external（对外）**：`host=app.example.com`，`path=/`，`strip_prefix=false` —— 公网入口。
-- **internal（服务间）**：`host=*`（通配），`path=/svc-<name>`，`strip_prefix=true` —— 让别的服务用稳定前缀调你，strip 后端只收到 `/...`。
+- **external**: `host=app.example.com`, `path=/`, `strip_prefix=false` — the public
+  entry.
+- **internal (service-to-service)**: `host=*` (wildcard), `path=/svc-<name>`,
+  `strip_prefix=true` — lets other services call you via a stable prefix; after
+  stripping, the backend only sees `/...`.
 
-路由字段（`ApplicationGatewayRoute`）：`host` / `path_prefix` / `strip_prefix` / `backend_path` / `enabled` / `backend_mode`（`single` | `all_enabled` | `selected`）/ `instance_select_mode`（`disabled` | `enabled`）/ `instance_header`（默认 `X-Agenda-Instance`）。多实例负载：`all_enabled` 轮询；定点加权：`selected` + `backends:[{target_id,weight}]`。
+Route fields (`ApplicationGatewayRoute`): `host` / `path_prefix` / `strip_prefix` /
+`backend_path` / `enabled` / `backend_mode` (`single` | `all_enabled` | `selected`) /
+`instance_select_mode` (`disabled` | `enabled`) / `instance_header` (default
+`X-Agenda-Instance`). Multi-instance load: `all_enabled` round-robins; targeted
+weighting: `selected` + `backends:[{target_id,weight}]`.
 
-**服务 A 调服务 B（agenda 托管的 Gin → Gin）**：给 B 配一条 internal 路由，A 里直接普通 HTTP 打网关：
+**Service A calling service B (agenda-hosted Gin → Gin)**: give B an internal route,
+and A just makes an ordinary HTTP call to the gateway:
 
 ```go
-// B(myapp-api) 的 internal 路由：host=* / path=/svc-myapp-api / strip=true
-base := os.Getenv("MYAPP_API_BASE") // 例：http://<gateway-host>:8081/svc-myapp-api（经 env 三层注入，别硬编码）
+// B(myapp-api)'s internal route: host=* / path=/svc-myapp-api / strip=true
+base := os.Getenv("MYAPP_API_BASE") // e.g. http://<gateway-host>:8081/svc-myapp-api (injected via three-layer env, don't hard-code)
 
-// 用 log.NewTransport 包一层，出站自动带上当前请求的 X-Agenda-Trace-Id ->
-// A、网关、B 的日志共享同一个 trace_id（全链路可关联）。ctx 用 c.Request.Context()。
+// Wrap with log.NewTransport so outbound requests auto-carry the current request's X-Agenda-Trace-Id ->
+// A, the gateway, and B share the same trace_id (fully correlatable). Use c.Request.Context() for ctx.
 client := &http.Client{Transport: log.NewTransport(nil)}
 req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, base+"/orders/123", nil)
-resp, err := client.Do(req) // 网关 strip 后 B 收到 /orders/123，且 B 日志里 trace_id 与 A 一致
+resp, err := client.Do(req) // after the gateway strips, B receives /orders/123, and B's logs carry the same trace_id as A
 ```
 
-- 普通业务流量**不需要 service token**。仅"实例 pin"（定向到指定实例，`instance_select_mode=enabled` + header `X-Agenda-Instance: green`）才需要网关 token 且带 `route.invoke` 权限。
-- 下游地址（`MYAPP_API_BASE`、`GATEWAY_HOST`）一律走 env 注入的配置，不写死 IP。
+- Ordinary business traffic **needs no service token**. Only "instance pinning" (route
+  to a specific instance, `instance_select_mode=enabled` + header
+  `X-Agenda-Instance: green`) needs a gateway token with the `route.invoke` permission.
+- Downstream addresses (`MYAPP_API_BASE`, `GATEWAY_HOST`) always come from env-injected
+  config, never a hard-coded IP.
 
-## 5. 日志（浏览 + 规范）
+## 5. Logging (viewing + conventions)
 
-- **写**：`sdk/go/log` 自动落 `/var/log/agenda/<app>[__<instance>][__<service>][__<replica>].log`（JSON 行，lumberjack 轮转）。多实例 / 多 service 天然分文件不串。每行自动带身份字段：
+- **Write**: `sdk/go/log` auto-writes
+  `/var/log/agenda/<app>[__<instance>][__<service>][__<replica>].log` (JSON lines,
+  lumberjack rotation). Multiple instances / services naturally split into separate
+  files without bleed. Every line auto-carries identity fields:
   ```json
   {"level":"info","app":"myapp","service":"api","env":"prod","instance":"blue","trace_id":"9f2c…","msg":"http request","method":"GET","path":"/orders/123","status":200}
   ```
-- **多副本**（`--scale`）：默认单文件；伸缩服务须显式开 `AGENDA_LOG_PER_REPLICA=1`（或给唯一 `AGENDA_REPLICA_ID`），否则多副本抢同一文件、轮转互踩。
-- **看**：控制台 → 应用 → 实例 → **Logs**；或 API：
+- **Multiple replicas** (`--scale`): single file by default; a scaled service must
+  explicitly set `AGENDA_LOG_PER_REPLICA=1` (or give a unique `AGENDA_REPLICA_ID`),
+  otherwise replicas fight over one file and rotation clobbers itself.
+- **View**: console → application → instance → **Logs**; or the API:
   ```
   GET /api/v1/applications/:appID/instances/:targetID/logs?tail=200
   ```
-  前置：机器为 **agent 模式**（node 常驻）且该 release 已 verified。SSH 模式机器不支持读日志（已知设计限制）。
-- 结构化字段用 `zap.String/Int/Error(...)`，调用时带上 `ctx`（gin 用 `c.Request.Context()`）。
-- **trace（全链路关联）**：网关对每个请求注入/透传 `X-Agenda-Trace-Id`。应用侧加一行中间件把它落到 ctx，之后 `log.Info(ctx, ...)` 自动带 `trace_id`：
-  - gin：`r.Use(ginlog.Middleware())`（见 §2 骨架）
-  - net/http：`handler := log.TraceMiddleware(mux)`
-  - 出站调用别的服务：用 `&http.Client{Transport: log.NewTransport(nil)}` + `http.NewRequestWithContext(ctx, ...)`，trace 会透传下去（见 §4），全链路同一个 `trace_id`。
-  - 想再附自定义字段（如业务 request id）：设 `log.ContextFields` 钩子，与 `trace_id` 并存。
+  Prerequisite: the machine is in **agent mode** (node resident) and the release is
+  verified. SSH-mode machines don't support reading logs (a known design limitation).
+- Use `zap.String/Int/Error(...)` for structured fields, and pass `ctx` (in gin,
+  `c.Request.Context()`).
+- **trace (full-chain correlation)**: the gateway injects/propagates
+  `X-Agenda-Trace-Id` per request. On the app side, add one middleware line to land it
+  into ctx; then `log.Info(ctx, ...)` auto-carries `trace_id`:
+  - gin: `r.Use(ginlog.Middleware())` (see the §2 skeleton)
+  - net/http: `handler := log.TraceMiddleware(mux)`
+  - outbound calls to other services: use `&http.Client{Transport: log.NewTransport(nil)}`
+    + `http.NewRequestWithContext(ctx, ...)`, and the trace propagates downstream (see
+    §4), same `trace_id` across the whole chain.
+  - to attach extra custom fields (e.g. a business request id): set the
+    `log.ContextFields` hook, coexisting with `trace_id`.
 
-## 6. 监控（指标 + Grafana）
+## 6. Monitoring (metrics + Grafana)
 
-### 6.1 开箱即得的指标
+### 6.1 Metrics you get out of the box
 
-- **HTTP 服务指标**（加了 `ginmetric.Middleware()` 就有）：`http_requests_total{route,method,status}`、`http_request_duration_seconds{route,method}`。`route` 是**路由模板**（`c.FullPath()`，如 `/orders/:id`），基数受路由表约束不随流量爆炸。附带常量标签 `agenda_app` / `agenda_instance` / `agenda_service`。
-- **网关指标**（gateway 自带，`/-/metrics`）：`gateway_requests_total{route_key,service_name,env,backend,method,status_class,endpoint}`、`gateway_request_duration_seconds{route_key,service_name,env,method,endpoint}`。`endpoint` 是归一化的接口维度（数字/UUID/长 hex 段→`:id`，深度>6→`/*`，distinct>200→`/__other__`），服务维度 = PromQL 把 `endpoint` 聚合掉。
+- **HTTP service metrics** (present once `ginmetric.Middleware()` is added):
+  `http_requests_total{route,method,status}`,
+  `http_request_duration_seconds{route,method}`. `route` is the **route template**
+  (`c.FullPath()`, e.g. `/orders/:id`), so cardinality is bounded by the route table
+  and doesn't explode with traffic. Accompanied by constant labels `agenda_app` /
+  `agenda_instance` / `agenda_service`.
+- **Gateway metrics** (built into the gateway, `/-/metrics`):
+  `gateway_requests_total{route_key,service_name,env,backend,method,status_class,endpoint}`,
+  `gateway_request_duration_seconds{route_key,service_name,env,method,endpoint}`.
+  `endpoint` is the normalized API dimension (numbers/UUIDs/long hex segments → `:id`,
+  depth>6 → `/*`, distinct>200 → `/__other__`); the service dimension = aggregate
+  `endpoint` away in PromQL.
 
-### 6.2 开启自定义指标抓取（node 中转）
+### 6.2 Enabling custom-metric scraping (via the node relay)
 
-平台不让 Prometheus 直连每台机器的应用端口 —— control-plane 是唯一抓取入口，经 node relay。开启步骤：
+The platform doesn't let Prometheus connect directly to each machine's app ports —
+the control plane is the sole scrape entry, via the node relay. Steps to enable:
 
-1. 实例 target 设 `metrics_enabled=true` + 一个 `metrics_port`（宿主机端口，如 19464）。**需 agent 模式机器。**
-2. compose 发布 `${APP_METRICS_PORT}:9464`（平台把 metrics_port 作为 `APP_METRICS_PORT` 传给 compose）。
-3. 起可观测栈：`./deploy.sh up --observability`（Prometheus + Grafana）。Prometheus 经 `http_sd` 发现 target，relabel 加上 `app`（=Application 名）/ `env` / `instance` 标签。
+1. Set the instance target's `metrics_enabled=true` + a `metrics_port` (host port, e.g.
+   19464). **Requires an agent-mode machine.**
+2. compose publishes `${APP_METRICS_PORT}:9464` (the platform passes metrics_port as
+   `APP_METRICS_PORT` to compose).
+3. Bring up the observability stack: `./deploy.sh up --observability` (Prometheus +
+   Grafana). Prometheus discovers targets via `http_sd` and relabels in `app`
+   (= Application name) / `env` / `instance` labels.
 
-### 6.3 查询（PromQL）
+### 6.3 Querying (PromQL)
 
 ```promql
-# 自定义打点：某 app 的失败率
+# Custom instrumentation: an app's failure rate
 sum(rate(orders_failed_total{app="myapp-api"}[5m]))
 
-# 本应用 HTTP P95（按路由）
+# This app's HTTP P95 (by route)
 histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{app="myapp-api"}[5m])) by (le, route))
 
-# 网关：接口维度 QPS / 错误率 / P99
+# Gateway: per-endpoint QPS / error rate / P99
 sum(rate(gateway_requests_total{service_name="myapp-api"}[1m])) by (endpoint)
 sum(rate(gateway_requests_total{service_name="myapp-api",status_class="5xx"}[5m]))
   / sum(rate(gateway_requests_total{service_name="myapp-api"}[5m]))
 histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name="myapp-api"}[5m])) by (le, endpoint))
 ```
 
-**坑**：过滤本应用用 `app="<Application 名>"`（Prometheus relabel 注入的），**不要用 `agenda_service`** —— `agenda_service` 是 **compose service 名**，多 service app 里它 ≠ 应用名。
+**Trap**: filter your own app with `app="<Application name>"` (injected by Prometheus
+relabel); **don't use `agenda_service`** — `agenda_service` is the **compose service
+name**, which in a multi-service app ≠ the app name.
 
 ### 6.4 Grafana
 
-经控制台 nginx 同源反代在 `/grafana`（端口不外露）：`http://<host>:8090/grafana/`。控制台的 **Monitoring Tab** 内嵌 `/d-solo` 面板，每个 app 只看自己曲线（dashboard `service` 变量过滤）。无需再手填 Grafana URL。
+Reverse-proxied same-origin under the console's nginx at `/grafana` (the port isn't
+exposed): `http://<host>:8090/grafana/`. The console's **Monitoring Tab** embeds
+`/d-solo` panels; each app sees only its own curves (filtered by the dashboard
+`service` variable). No need to fill in a Grafana URL.
 
-## 7. 自定义打点（业务指标）
+## 7. Custom instrumentation (business metrics)
 
-用 `sdk/go/metric` 声明，全部当**包级 var**（见 §2 注释，注册须早于 `metric.Init`）：
+Declare with `sdk/go/metric`, all as **package-level vars** (see the §2 comment,
+registration must precede `metric.Init`):
 
 ```go
 var (
@@ -294,19 +386,25 @@ var (
 	})
 )
 
-// 业务代码里：
+// In business code:
 ordersTotal.WithLabelValues("wechat").Inc()
 queueDepth.Set(float64(n))
 timer := prometheus.NewTimer(payLatency); defer timer.ObserveDuration()
 ```
 
-API：`NewCounter/NewCounterVec`、`NewGauge/NewGaugeVec`、`NewHistogram/NewHistogramVec`。指标自动带 `agenda_app/instance/service` 常量标签。**基数纪律**：label value 必须有界（枚举/状态码/渠道），**绝不**用用户 id、订单号、原始 path 当 label。想要 Go runtime / process 指标：`metric.Init(metric.Config{EnableGoCollectors: true})`。
+API: `NewCounter/NewCounterVec`, `NewGauge/NewGaugeVec`,
+`NewHistogram/NewHistogramVec`. Metrics auto-carry the `agenda_app/instance/service`
+constant labels. **Cardinality discipline**: label values must be bounded
+(enum/status code/channel); **never** use a user id, order number, or raw path as a
+label. For Go runtime / process metrics:
+`metric.Init(metric.Config{EnableGoCollectors: true})`.
 
-## 8. 告警（两条链路）
+## 8. Alerting (two paths)
 
-### 8.1 指标驱动 —— AlertRule（PromQL 规则引擎）
+### 8.1 Metric-driven — AlertRule (PromQL rule engine)
 
-平台自建 PromQL 规则引擎（无需 Alertmanager）。建规则：
+The platform has a self-built PromQL rule engine (no Alertmanager needed). Create a
+rule:
 
 ```bash
 curl -X POST $BASE/api/v1/alert-rules -H "Authorization: Bearer $TOKEN" \
@@ -318,15 +416,23 @@ curl -X POST $BASE/api/v1/alert-rules -H "Authorization: Bearer $TOKEN" \
     "channels": [],
     "enabled": true
   }'
-# 立即预览评估（绕过 30s ticker，不落状态、不真发）
+# Preview an evaluation immediately (bypasses the 30s ticker, no state persisted, nothing actually sent)
 curl -X POST $BASE/api/v1/alert-rules/<RID>/test -H "Authorization: Bearer $TOKEN"
 ```
 
-字段：`expr`（instant PromQL，**结果向量非空 = breaching**，窗口自己在 expr 里用 `rate(...[5m])` 表达）、`for_seconds`（连续多少个评估 tick 保持 breach 才 fire，0 = 首次即 fire；**是按评估次数近似，非原生 `for:`**）、`level`（info/warning/critical）、`channels`（渠道名数组，空 = 不发外部渠道但**仍写站内信**）、`enabled`。规则 CRUD：`GET/POST /alert-rules`、`GET/PUT/DELETE /alert-rules/:id`。firing→ok 边沿自动发 `recovered` 通知。
+Fields: `expr` (instant PromQL, **a non-empty result vector = breaching**; express the
+window in the expr itself via `rate(...[5m])`), `for_seconds` (how many consecutive
+evaluation ticks must stay breaching before firing, 0 = fire on the first;
+**approximated by evaluation count, not a native `for:`**), `level`
+(info/warning/critical), `channels` (array of channel names, empty = don't send to
+external channels but **still write the in-app inbox**), `enabled`. Rule CRUD:
+`GET/POST /alert-rules`, `GET/PUT/DELETE /alert-rules/:id`. The firing→ok edge
+auto-sends a `recovered` notification.
 
-### 8.2 业务事件驱动 —— 代码里发告警
+### 8.2 Business-event driven — send alerts from code
 
-**方式 a：SDK 自包含（`sdk/go/alert`，零平台依赖，业务内部直接调）**
+**Option a: SDK self-contained (`sdk/go/alert`, zero platform dependency, called
+directly from business code)**
 
 ```go
 import "github.com/FredrickUnderwood/agenda-v2/sdk/go/alert"
@@ -337,50 +443,90 @@ ch := alert.Channel{
 	Enabled: true,
 }
 results := alert.SendAll(ctx, []alert.Channel{ch}, alert.Message{
-	Title: "对账失败", Content: "batch=20260725 diff=3", Level: alert.LevelCritical,
+	Title: "reconciliation failed", Content: "batch=20260725 diff=3", Level: alert.LevelCritical,
 })
 for _, r := range results { if r.Err != nil { log.Warn(ctx, "alert send failed", zap.String("ch", r.Channel), zap.Error(r.Err)) } }
 ```
 
-支持 `ChannelFeishu`（HMAC-SHA256 签名）/ `ChannelDingTalk` / `ChannelWeCom` / `ChannelSlack` / `ChannelCustom`。`Send` 单发、`SendAll` 并发多发各返回一个 `Result`。Level：`LevelInfo/LevelWarning/LevelCritical`。**渠道 webhook / secret 由应用自己持有**（走 env 注入）。
+Supports `ChannelFeishu` (HMAC-SHA256 signed) / `ChannelDingTalk` / `ChannelWeCom` /
+`ChannelSlack` / `ChannelCustom`. `Send` sends to one, `SendAll` sends to many
+concurrently, each returning a `Result`. Levels:
+`LevelInfo/LevelWarning/LevelCritical`. **The channel webhook / secret is held by the
+app itself** (via env injection).
 
-**方式 b：复用平台集中配置的渠道 + 站内信** —— 调 control-plane：
+**Option b: reuse the platform's centrally-configured channels + in-app inbox** — call
+the control plane:
 
 ```bash
 curl -X POST $BASE/api/v1/alerts -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"title":"对账失败","content":"...","level":"critical","channels":["ops"]}'
+  -d '{"title":"reconciliation failed","content":"...","level":"critical","channels":["ops"]}'
 ```
 
-`channels` 省略 = 所有 enabled 渠道；指定名字 = 只发这些。渠道在控制台 **Settings** 配，key 形如 `alert.channel.<type>.<name>`（如 `alert.channel.feishu.ops`），value 为 JSON `{"webhook_url":"...","secret":"...","enabled":true}`（`is_secret` 加密存）。每次发送**无条件写一条站内信**（`NotificationBell` / `/inbox` 可见），外部渠道挂了也有兜底记录。
+Omitting `channels` = all enabled channels; naming them = only those. Channels are
+configured in the console **Settings**, with keys like
+`alert.channel.<type>.<name>` (e.g. `alert.channel.feishu.ops`) and a JSON value
+`{"webhook_url":"...","secret":"...","enabled":true}` (`is_secret` stored encrypted).
+Every send **unconditionally writes one in-app notification** (visible in the
+`NotificationBell` / `/inbox`), so there's a fallback record even if an external
+channel is down.
 
-**选型**：指标类阈值告警 → §8.1 AlertRule；业务事件（对账不平、任务失败）→ §8.2；要集中管渠道密钥 + 站内信兜底选方式 b，要完全自包含、不依赖平台选方式 a。
+**Choosing**: metric threshold alerts → §8.1 AlertRule; business events
+(reconciliation mismatch, task failure) → §8.2; want centrally-managed channel secrets
++ in-app-inbox fallback, pick option b; want fully self-contained with no platform
+dependency, pick option a.
 
-## 9. 部署到 agenda（golden path）
+## 9. Deploying to agenda (golden path)
 
-控制台或 API 走一遍：
+Walk through it in the console or via the API:
 
-1. **建 Application**：name、repo_url、deploy_method=`docker`、deploy_config（JSON：`work_dir` / `compose_file` / `services` / `env` / `health_check`）。
-2. **建环境实例 target**：env（如 prod）、instance_name、machine_id、`port`（=APP_PORT）、健康检查（默认 `GET /healthz` 期望 200）、需要监控就 `metrics_enabled` + `metrics_port`。
-3. **配路由**（Routes Tab）：external 绑 host，internal 用 `/svc-<name>` + strip（见 §4）。
-4. **发布**：建 release（分支）→ deploy（异步跑流水线 `git_pull → compose_up → compose_healthcheck → gateway_routes_sync`）→ 轮询 success → verify。失败 `retry` / `rollback`。
-5. **验证**：流量采样、看日志、看监控、（可选）触发一次告警确认站内信到。
+1. **Create the Application**: name, repo_url, deploy_method=`docker`, deploy_config
+   (JSON: `work_dir` / `compose_file` / `services` / `env` / `health_check`).
+2. **Create an environment instance target**: env (e.g. prod), instance_name,
+   machine_id, `port` (=APP_PORT), health check (default `GET /healthz` expecting 200),
+   and for monitoring `metrics_enabled` + `metrics_port`.
+3. **Configure routes** (Routes Tab): external binds a host, internal uses `/svc-<name>`
+   + strip (see §4).
+4. **Release**: create a release (branch) → deploy (async pipeline
+   `git_pull → compose_up → compose_healthcheck → gateway_routes_sync`) → poll to
+   success → verify. On failure `retry` / `rollback`.
+5. **Verify**: sample traffic, check logs, check monitoring, (optionally) trigger an
+   alert to confirm the in-app inbox receives it.
 
-改代码重新上线：新 release → deploy。改实例 / 路由：`PUT /applications/:id` 是**全量 desired state**（所有实例都要带，漏了当删除；`gateway_routes` 不带=不动、`[]`=清空；路由只挂在一个代表 target、其余发 `[]`）。
+Redeploy after a code change: new release → deploy. Change instances / routes:
+`PUT /applications/:id` is the **full desired state** (all instances must be included;
+an omitted one counts as deleted; `gateway_routes` omitted = unchanged, `[]` = cleared;
+routes attach to one representative target, send `[]` for the rest).
 
-## 10. 高频坑（部署 / 运行）
+## 10. Common traps (deploy / runtime)
 
-- **健康门控是部署时快照**：实例健康 / enabled 变化不会实时推给网关，要**重新部署**触发 `gateway_routes_sync` 才生效。
-- **"健康却 502 unknown instance"**：node 内存反代注册表重启清空；控制面每 ~30s 幂等重注册，等一个 tick 或重新部署即自愈。
-- **跨节点 all-or-nothing**：某节点离线会让同路由池内**其它健康节点**实例的重新部署整步失败；缓解：临时 disable 离线节点的 target。
-- **指标 / 日志需 agent 模式机器**，SSH 模式不支持。
-- **不要自己设 `AGENDA_*` env 或手挂 `/var/log/agenda`**，平台 override 会注入；`AGENDA_` 前缀的用户 env 会被丢弃。
-- **过滤本应用指标用 `app=` 不是 `agenda_service=`**（后者是 compose service 名）。
-- **`metrics_port` 冲突 / 端口复用 / 非法实例名**等业务校验目前可能返回 HTTP 500（状态码不规范，不影响功能）。
+- **Health gating is a deploy-time snapshot**: instance health / enabled changes aren't
+  pushed to the gateway in real time; you must **redeploy** to trigger
+  `gateway_routes_sync` for them to take effect.
+- **"Healthy but 502 unknown instance"**: the node's in-memory reverse-proxy registry is
+  cleared on restart; the control plane idempotently re-registers every ~30s, so wait
+  one tick or redeploy and it self-heals.
+- **Cross-node all-or-nothing**: one node being offline makes a redeploy of instances of
+  **other healthy nodes** in the same route pool fail the whole step; mitigation:
+  temporarily disable the offline node's target.
+- **Metrics / logs require an agent-mode machine**; SSH mode is unsupported.
+- **Don't set `AGENDA_*` env yourself or manually mount `/var/log/agenda`**; the
+  platform override injects them; user env with an `AGENDA_` prefix is discarded.
+- **Filter your own app's metrics with `app=`, not `agenda_service=`** (the latter is
+  the compose service name).
+- **`metrics_port` conflicts / port reuse / invalid instance names** and similar
+  business validations may currently return HTTP 500 (a non-standard status code that
+  doesn't affect functionality).
 
-## 11. 与其它 skill 的边界
+## 11. Boundaries with other skills
 
-- **通用 Dockerfile / docker-compose / 国内 registry mirror / 容器连宿主机 MySQL** → **docker-dev**（本 skill 只讲 agenda-v2 特有契约：`AGENDA_*` env、`APP_PORT`/`APP_METRICS_PORT`、日志卷、路由同步）。
-- **老内部体系**（`agenda-go-sdk` / `user-core-go-sdk` / `agenda-fe` / 独立 gateway 仓库）→ **rd-standards**。
-- **架构设计 / 表结构 / 技术方案** → architecture / tech-design-doc。
-- 本 skill 专注：把 Gin+React 交给 **agenda-v2** 托管并接入其 SDK（log/metric/alert）+ 网关 + 监控 + 告警。
+- **Generic Dockerfile / docker-compose / China registry mirror / container-to-host
+  MySQL** → **docker-dev** (this skill only covers agenda-v2-specific contracts:
+  `AGENDA_*` env, `APP_PORT`/`APP_METRICS_PORT`, the log volume, route sync).
+- **Old internal stack** (`agenda-go-sdk` / `user-core-go-sdk` / `agenda-fe` / the
+  standalone gateway repo) → **rd-standards**.
+- **Architecture design / table schema / technical proposals** → architecture /
+  tech-design-doc.
+- This skill focuses on: handing Gin+React to **agenda-v2** to host and wiring in its
+  SDK (log/metric/alert) + gateway + monitoring + alerting.
+```

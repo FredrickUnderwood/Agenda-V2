@@ -7,7 +7,7 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
 )
 
-// NotificationService is the CRUD home for the in-app inbox ("站内信") —
+// NotificationService is the CRUD home for the in-app inbox —
 // handlers go through this. AlertService, by contrast, depends on
 // *repository.NotificationRepository directly to write new entries: that's
 // plain data assembly (create a record alongside sending external alerts),

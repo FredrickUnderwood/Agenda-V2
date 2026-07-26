@@ -2,7 +2,7 @@ package alert
 
 import "context"
 
-// sendWeCom POSTs a text message to a WeCom (企业微信) group-bot webhook. The
+// sendWeCom POSTs a text message to a WeCom (WeChat Work) group-bot webhook. The
 // bot's key is already embedded in ch.WebhookURL; WeCom's basic text messages
 // have no additional signing scheme (unlike Feishu/DingTalk).
 func sendWeCom(ctx context.Context, ch Channel, msg Message) error {

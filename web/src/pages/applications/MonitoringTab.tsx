@@ -22,7 +22,7 @@ const ENDPOINT_LATENCY_PANELS = [
 ] as const
 
 // Panels driven by the app's own sdk/go/metric instrumentation (real
-// registered routes, not the gateway's heuristic path归一). Only populated for
+// registered routes, not the gateway's heuristic path normalization). Only populated for
 // apps that add the metric middleware; empty otherwise.
 const APP_ROUTE_RATE_PANELS = [
   { id: 8, title: 'QPS by app route' },

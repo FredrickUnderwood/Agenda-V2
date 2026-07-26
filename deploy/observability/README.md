@@ -95,7 +95,7 @@ by-endpoint QPS / error-rate / P50-P95-P99 panels (ids 3–5), filterable via th
 
 Deployed apps can define their own metrics (counters, gauges, histograms) via
 `sdk/go/metric` and have them scraped alongside the gateway's own metrics —
-useful for business-level "打点" like `orders_failed_total`, which alert rules
+useful for business-level instrumentation like `orders_failed_total`, which alert rules
 (see below) can then fire on.
 
 The control plane, not Prometheus, is what reaches each app instance: it

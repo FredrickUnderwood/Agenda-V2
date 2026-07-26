@@ -106,7 +106,7 @@ func (s *Server) registerRoutes() {
 	v1.GET("/auth/me", s.me)
 	v1.GET("/config", s.getConfig)
 
-	// Notifications are the shared in-app inbox ("站内信") — any authenticated
+	// Notifications are the shared in-app inbox — any authenticated
 	// user can read/dismiss them, unlike Settings/Alerts which hold secrets or
 	// can trigger external sends.
 	notifications := v1.Group("/notifications")

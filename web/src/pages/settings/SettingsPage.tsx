@@ -80,7 +80,7 @@ export function SettingsPage() {
         items={[
           {
             key: 'gateway-tls',
-            label: 'Gateway edge TLS — HTTPS 证书签发（ACME DNS-01）',
+            label: 'Gateway edge TLS — HTTPS certificate issuance (ACME DNS-01)',
             children: (
               <div>
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
