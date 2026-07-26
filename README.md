@@ -65,6 +65,50 @@ frontend + backend apps** on machines *you* control.
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    U(["Users / clients"])
+    DEV(["You: git repo + docker-compose.yml"])
+
+    subgraph CP["Control-plane host"]
+        direction TB
+        API["agenda-v2 control plane<br/>API · orchestration · auth · settings · alerts"]
+        WEB["web console<br/>React + Ant Design"]
+        DB[("MySQL")]
+        RD[("Redis")]
+        PROM["Prometheus"]
+        GRAF["Grafana"]
+    end
+
+    GW["agenda-gateway<br/>edge TLS · dynamic routing"]
+
+    subgraph TGT["Target machine"]
+        direction TB
+        NODE["agenda-node<br/>deploy agent · local reverse proxy"]
+        APP["your app containers<br/>Gin / React"]
+    end
+
+    CH["Alert channels<br/>Feishu · DingTalk · WeCom · Slack"]
+
+    U -->|HTTPS| GW
+    GW -->|"/i/:instance"| NODE
+    NODE -->|"127.0.0.1:APP_PORT"| APP
+
+    DEV -->|"create app · deploy"| API
+    API -->|"dispatch deploy jobs"| NODE
+    NODE -.->|heartbeat| API
+    API -->|"configure routes"| GW
+    API -->|"logs · metrics · health via node relay"| NODE
+
+    WEB --- API
+    API --- DB
+    API --- RD
+    PROM -->|"scrape via relay"| API
+    GRAF --> PROM
+    WEB -.->|"embed /grafana"| GRAF
+    API -->|"fire alerts"| CH
+```
+
 Three independently built, independently deployed binaries share one repo and one
 `go.mod`:
 

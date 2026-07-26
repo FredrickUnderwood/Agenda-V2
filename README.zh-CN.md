@@ -55,6 +55,50 @@
 
 ## 架构
 
+```mermaid
+flowchart TB
+    U(["用户 / 客户端"])
+    DEV(["你：git 仓库 + docker-compose.yml"])
+
+    subgraph CP["控制面主机"]
+        direction TB
+        API["agenda-v2 控制面<br/>API · 编排 · 鉴权 · 设置 · 告警"]
+        WEB["Web 控制台<br/>React + Ant Design"]
+        DB[("MySQL")]
+        RD[("Redis")]
+        PROM["Prometheus"]
+        GRAF["Grafana"]
+    end
+
+    GW["agenda-gateway<br/>边缘 TLS · 动态路由"]
+
+    subgraph TGT["目标机器"]
+        direction TB
+        NODE["agenda-node<br/>部署 agent · 本机反向代理"]
+        APP["你的应用容器<br/>Gin / React"]
+    end
+
+    CH["告警渠道<br/>飞书 · 钉钉 · 企业微信 · Slack"]
+
+    U -->|HTTPS| GW
+    GW -->|"/i/:instance"| NODE
+    NODE -->|"127.0.0.1:APP_PORT"| APP
+
+    DEV -->|"建应用 · 部署"| API
+    API -->|"下发部署任务"| NODE
+    NODE -.->|心跳| API
+    API -->|"配置路由"| GW
+    API -->|"日志 · 指标 · 健康经 node 中转"| NODE
+
+    WEB --- API
+    API --- DB
+    API --- RD
+    PROM -->|"经中转抓取"| API
+    GRAF --> PROM
+    WEB -.->|"内嵌 /grafana"| GRAF
+    API -->|"发送告警"| CH
+```
+
 三个独立编译、独立部署的二进制,共享同一个仓库和同一个 `go.mod`：
 
 | 二进制 | 职责 |
