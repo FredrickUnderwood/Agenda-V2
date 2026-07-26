@@ -11,6 +11,8 @@
 [![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-yes-brightgreen.svg)](#quickstart-single-host)
 
+**English** · [简体中文](README.zh-CN.md)
+
 </div>
 
 ---
