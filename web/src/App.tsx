@@ -13,6 +13,7 @@ import { ApplicationsListPage } from '@/pages/applications/ApplicationsListPage'
 import { InstanceLogsPage } from '@/pages/applications/InstanceLogsPage'
 import { InboxPage } from '@/pages/InboxPage'
 import { MachinesListPage } from '@/pages/machines/MachinesListPage'
+import { GatewayPage } from '@/pages/gateway/GatewayPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
                 <Route path="applications/:appId" element={<ApplicationDetailPage />} />
                 <Route path="applications/:appId/instances/:targetId/logs" element={<InstanceLogsPage />} />
                 <Route path="machines" element={<MachinesListPage />} />
+                <Route path="gateway" element={<GatewayPage />} />
                 <Route path="alert-rules" element={<AlertRulesPage />} />
                 <Route path="inbox" element={<InboxPage />} />
                 <Route path="settings" element={<SettingsPage />} />
