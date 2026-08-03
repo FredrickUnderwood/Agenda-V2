@@ -4,19 +4,12 @@ import { Input, Space, Table, Tag, Tooltip } from 'antd'
 import { StatusPill } from '@/components/StatusPill'
 import { color } from '@/theme/tokens'
 import type { GatewayModel, GwRoute } from './model'
-import { healthTone } from './model'
+import { healthColor } from './model'
 
 const BACKEND_MODE_LABEL: Record<string, string> = {
   all_enabled: 'all enabled',
   single: 'single',
   selected: 'selected',
-}
-
-const DOT_COLOR: Record<ReturnType<typeof healthTone>, string> = {
-  verified: color.verified,
-  failed: color.fail,
-  building: color.signal,
-  idle: '#9b9eaa',
 }
 
 // Every gateway route, one row per route — the "table mode" of the visualization.
@@ -86,7 +79,7 @@ export function GatewayTable({ model }: { model: GatewayModel }) {
                   r.instances.map((i) => (
                     <Tooltip key={i.targetId} title={`${i.health}${i.enabled ? '' : ' · disabled'}${i.weight != null ? ` · weight ${i.weight}` : ''}`}>
                       <span className="agenda-mono" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, opacity: i.enabled ? 1 : 0.5 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: 999, background: DOT_COLOR[healthTone(i.health)] }} />
+                        <span style={{ width: 7, height: 7, borderRadius: 999, background: healthColor(i.health) }} />
                         {i.name}
                         {i.weight != null ? <span style={{ color: color.ink500 }}>·w{i.weight}</span> : null}
                       </span>

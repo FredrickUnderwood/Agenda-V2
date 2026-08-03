@@ -1,26 +1,42 @@
 import { useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { Segmented, Space, Spin, Typography } from 'antd'
+import { Segmented, Space, Spin, Tabs, Typography } from 'antd'
 import { PartitionOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import * as api from '@/api/applications'
+import { getConfig } from '@/api/config'
 import { RefreshButton } from '@/components/RefreshButton'
+import type { Environment } from '@/api/types'
 import { color } from '@/theme/tokens'
-import { buildGatewayModel, type AppInstances } from './model'
+import {
+  buildGatewayModel,
+  envsInModel,
+  filterModelByEnv,
+  summarize,
+  type AppInstances,
+  type GatewayModel,
+} from './model'
 import { GatewayTopology } from './GatewayTopology'
 import { GatewayTable } from './GatewayTable'
+import { GatewayStatusBar, HealthChips, StatusDot } from './GatewayHealth'
 
 type Mode = 'topology' | 'table'
+type EnvKey = Environment | 'all'
+
+const ENV_LABEL: Record<Environment, string> = { prod: 'Prod', stage: 'Stage', test: 'Test' }
 
 // Gateway route visualization: aggregates every application's env-scoped routes
-// into one request-flow model and renders it either as a Host→Route→Service
-// topology (route mode) or a flat route table.
+// into one request-flow model, shows an overall health rollup, and renders each
+// environment's route map on its own tab — as a Host→Route→Service topology or a
+// flat route table.
 export function GatewayPage() {
   const [mode, setMode] = useState<Mode>('topology')
+  const [selectedEnv, setSelectedEnv] = useState<EnvKey | null>(null)
 
   const { data: appsResp, isLoading: appsLoading } = useQuery({
     queryKey: ['applications'],
     queryFn: api.listApplications,
   })
+  const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig })
   const apps = useMemo(() => appsResp?.data ?? [], [appsResp])
 
   // One instances query per app (parallel); the queryKey matches RoutesTab's, so
@@ -42,18 +58,24 @@ export function GatewayPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apps, instanceQueries.map((q) => q.dataUpdatedAt).join(',')])
 
-  const enabledRoutes = model.routes.filter((r) => r.enabled).length
-  const orphanRoutes = model.routes.filter((r) => r.instances.length === 0).length
+  const overall = useMemo(() => summarize(model), [model])
+  const envs = useMemo(() => envsInModel(model), [model])
+
+  // Tab keys: one per present env, plus "All" once more than one env exists.
+  const tabKeys: EnvKey[] = useMemo(() => (envs.length > 1 ? [...envs, 'all'] : envs), [envs])
+  const activeEnv: EnvKey = selectedEnv && tabKeys.includes(selectedEnv) ? selectedEnv : (tabKeys[0] ?? 'all')
+
+  const renderView = (m: GatewayModel) => (mode === 'topology' ? <GatewayTopology model={m} /> : <GatewayTable model={m} />)
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
         <div>
           <Typography.Title level={3} className="agenda-display" style={{ margin: 0 }}>
             Gateway routes
           </Typography.Title>
           <Typography.Text type="secondary">
-            Which inbound hosts and paths route to which services — across every application and environment.
+            Which inbound hosts and paths route to which services — with backend health, per environment.
           </Typography.Text>
         </div>
         <Space>
@@ -65,38 +87,45 @@ export function GatewayPage() {
               { value: 'table', label: 'Table', icon: <UnorderedListOutlined /> },
             ]}
           />
-          <RefreshButton queryKeys={[['applications']]} />
+          <RefreshButton queryKeys={[['applications'], ['config']]} />
         </Space>
       </div>
-
-      <Space size={24} style={{ marginBottom: 20 }}>
-        <Stat label="Routes" value={`${model.routes.length}`} />
-        <Stat label="Enabled" value={`${enabledRoutes}`} />
-        <Stat label="Hosts" value={`${model.hosts.length}`} />
-        <Stat label="Services" value={`${model.services.length}`} />
-        {orphanRoutes > 0 ? <Stat label="No backend" value={`${orphanRoutes}`} tone={color.fail} /> : null}
-      </Space>
 
       {loading ? (
         <div style={{ padding: '80px 0', textAlign: 'center' }}>
           <Spin />
         </div>
-      ) : mode === 'topology' ? (
-        <GatewayTopology model={model} />
       ) : (
-        <GatewayTable model={model} />
-      )}
-    </div>
-  )
-}
+        <>
+          <GatewayStatusBar summary={overall} gatewayEnabled={config?.gateway.enabled} baseUrl={config?.gateway.base_url} envCount={envs.length} />
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div>
-      <div className="agenda-display" style={{ fontSize: 22, fontWeight: 600, color: tone ?? color.ink900, lineHeight: 1.1 }}>
-        {value}
-      </div>
-      <div style={{ fontSize: 12, color: color.ink500 }}>{label}</div>
+          {tabKeys.length === 0 ? (
+            // No routes anywhere — let the active view render its own empty state.
+            renderView(model)
+          ) : (
+            <Tabs
+              activeKey={activeEnv}
+              onChange={(k) => setSelectedEnv(k as EnvKey)}
+              items={tabKeys.map((key) => {
+                const m = filterModelByEnv(model, key)
+                const s = summarize(m)
+                return {
+                  key,
+                  label: <StatusDot status={s.status} label={key === 'all' ? 'All' : ENV_LABEL[key]} />,
+                  children: (
+                    <div>
+                      <div style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${color.paperBorder}` }}>
+                        <HealthChips summary={s} />
+                      </div>
+                      {renderView(m)}
+                    </div>
+                  ),
+                }
+              })}
+            />
+          )}
+        </>
+      )}
     </div>
   )
 }

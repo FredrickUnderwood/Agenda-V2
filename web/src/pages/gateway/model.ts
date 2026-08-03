@@ -5,6 +5,7 @@ import type {
   Environment,
   GatewayBackendMode,
 } from '@/api/types'
+import { color } from '@/theme/tokens'
 
 // The gateway visualization aggregates the per-application, per-env route config
 // (routes are echoed onto every target of an env — see targetPayload.ts) into a
@@ -171,5 +172,125 @@ export function healthTone(status: string): 'verified' | 'failed' | 'building' |
       return 'idle'
     default:
       return 'building'
+  }
+}
+
+const IDLE_GREY = '#9b9eaa'
+
+// Resolves an instance health status to a dot color. Shared by the topology and
+// table so a healthy/unhealthy/unknown backend reads the same in both.
+export function healthColor(status: string): string {
+  switch (healthTone(status)) {
+    case 'verified':
+      return color.verified
+    case 'failed':
+      return color.fail
+    case 'building':
+      return color.signal
+    default:
+      return IDLE_GREY
+  }
+}
+
+// ── health rollup ───────────────────────────────────────────────────────────
+//
+// There's no dedicated gateway-health API, so "health" here is derived from the
+// backend instances each route actually reaches (already resolved on GwRoute).
+// A route is only as healthy as the instances serving it; an environment is as
+// healthy as its worst enabled route.
+
+export type RouteHealth = 'operational' | 'degraded' | 'down' | 'disabled'
+
+export function routeHealth(r: GwRoute): RouteHealth {
+  if (!r.enabled) return 'disabled'
+  const serving = r.instances.filter((i) => i.enabled)
+  // Enabled route that resolves to no serving instance can't take traffic.
+  if (serving.length === 0) return 'down'
+  const healthy = serving.filter((i) => healthTone(i.health) === 'verified').length
+  const bad = serving.filter((i) => healthTone(i.health) === 'failed').length
+  if (healthy === serving.length) return 'operational' // every backend confirmed healthy
+  if (healthy === 0 && bad === serving.length) return 'down' // every backend confirmed unhealthy
+  return 'degraded' // mixed, or health not yet known (unknown counts as not-yet-healthy)
+}
+
+export type EnvStatus = 'operational' | 'degraded' | 'down' | 'none'
+
+export interface HealthSummary {
+  status: EnvStatus
+  operational: number
+  degraded: number
+  down: number
+  disabled: number
+  routes: number
+  hosts: number
+  services: number
+}
+
+// Aggregate a route set into a single status (worst enabled route wins) plus the
+// per-bucket counts the status bar and env panels display.
+export function summarize(model: GatewayModel): HealthSummary {
+  let operational = 0
+  let degraded = 0
+  let down = 0
+  let disabled = 0
+  for (const r of model.routes) {
+    switch (routeHealth(r)) {
+      case 'operational':
+        operational++
+        break
+      case 'degraded':
+        degraded++
+        break
+      case 'down':
+        down++
+        break
+      case 'disabled':
+        disabled++
+        break
+    }
+  }
+  const status: EnvStatus = down > 0 ? 'down' : degraded > 0 ? 'degraded' : operational > 0 ? 'operational' : 'none'
+  return {
+    status,
+    operational,
+    degraded,
+    down,
+    disabled,
+    routes: model.routes.length,
+    hosts: model.hosts.length,
+    services: model.services.length,
+  }
+}
+
+export interface StatusMeta {
+  label: string
+  color: string
+}
+
+export const ENV_STATUS_META: Record<EnvStatus, StatusMeta> = {
+  operational: { label: 'Operational', color: color.verified },
+  degraded: { label: 'Degraded', color: color.signal },
+  down: { label: 'Down', color: color.fail },
+  none: { label: 'No routes', color: IDLE_GREY },
+}
+
+// Environments present in the model, in a stable display order.
+export function envsInModel(model: GatewayModel): Environment[] {
+  const present = new Set(model.routes.map((r) => r.env))
+  return (['prod', 'stage', 'test'] as Environment[]).filter((e) => present.has(e))
+}
+
+// A sub-model containing only one environment's routes (and the hosts/services
+// they reference), so each env tab renders an isolated route map. 'all' is a
+// passthrough.
+export function filterModelByEnv(model: GatewayModel, env: Environment | 'all'): GatewayModel {
+  if (env === 'all') return model
+  const routes = model.routes.filter((r) => r.env === env)
+  const hostIds = new Set(routes.map((r) => r.hostId))
+  const serviceIds = new Set(routes.map((r) => r.serviceId))
+  return {
+    routes,
+    hosts: model.hosts.filter((h) => hostIds.has(h.id)),
+    services: model.services.filter((s) => serviceIds.has(s.id)),
   }
 }

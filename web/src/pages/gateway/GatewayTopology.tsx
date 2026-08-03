@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Empty, Tag } from 'antd'
 import { color } from '@/theme/tokens'
 import type { GatewayModel, GwInstance } from './model'
-import { healthTone } from './model'
+import { healthColor } from './model'
 
 // A layered request-flow graph: Inbound host → Route → Service. Nodes are HTML
 // (so they can use antd Tags / the mono font), edges are an SVG overlay behind
@@ -19,13 +19,6 @@ const ROUTE_H = 64
 const SVC_HEADER = 44
 const SVC_ROW = 22
 const SVC_PAD = 14
-
-const DOT_COLOR: Record<ReturnType<typeof healthTone>, string> = {
-  verified: color.verified,
-  failed: color.fail,
-  building: color.signal,
-  idle: '#9b9eaa',
-}
 
 interface Box {
   x: number
@@ -227,7 +220,7 @@ function NodeShell({
 function InstanceRow({ inst }: { inst: GwInstance }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: inst.enabled ? 1 : 0.5 }}>
-      <span style={{ width: 7, height: 7, borderRadius: 999, flex: 'none', background: DOT_COLOR[healthTone(inst.health)] }} />
+      <span style={{ width: 7, height: 7, borderRadius: 999, flex: 'none', background: healthColor(inst.health) }} />
       <span className="agenda-mono" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {inst.name}
       </span>
