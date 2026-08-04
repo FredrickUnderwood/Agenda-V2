@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd'
-import { PlusOutlined, ReloadOutlined, PoweroffOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, PoweroffOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import * as api from '@/api/applications'
 import * as machinesApi from '@/api/machines'
@@ -82,15 +82,6 @@ export function InstancesTab({ appId }: { appId: number }) {
     mutationFn: (targetId: number) => api.decommissionInstance(appId, targetId),
     onSuccess: () => {
       message.success('Instance is being decommissioned — traffic drained, containers tearing down.')
-      queryClient.invalidateQueries({ queryKey: ['applications', appId, 'instances'] })
-    },
-    onError: (err: unknown) => message.error(errorMessage(err)),
-  })
-
-  const recommissionMutation = useMutation({
-    mutationFn: (targetId: number) => api.recommissionInstance(appId, targetId),
-    onSuccess: () => {
-      message.success('Instance recommissioned — deploy it to bring the containers back.')
       queryClient.invalidateQueries({ queryKey: ['applications', appId, 'instances'] })
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
@@ -196,26 +187,24 @@ export function InstancesTab({ appId }: { appId: number }) {
           {
             title: '',
             key: 'actions',
-            render: (_, record) => (
-              <Space size="small">
-                <Button
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  loading={checkHealthMutation.isPending && checkHealthMutation.variables === record.id}
-                  onClick={() => checkHealthMutation.mutate(record.id)}
-                >
-                  Check health
-                </Button>
-                {record.desired_state === 'stopped' ? (
+            render: (_, record) =>
+              // A stopped instance has no containers to health-check, and it is
+              // brought back by deploying it (there is no recommission) — so its
+              // only affordance is a hint pointing at the Deploy flow.
+              record.desired_state === 'stopped' ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  Stopped · deploy to restart
+                </Typography.Text>
+              ) : (
+                <Space size="small">
                   <Button
                     size="small"
-                    icon={<PlayCircleOutlined />}
-                    loading={recommissionMutation.isPending && recommissionMutation.variables === record.id}
-                    onClick={() => recommissionMutation.mutate(record.id)}
+                    icon={<ReloadOutlined />}
+                    loading={checkHealthMutation.isPending && checkHealthMutation.variables === record.id}
+                    onClick={() => checkHealthMutation.mutate(record.id)}
                   >
-                    Recommission
+                    Check health
                   </Button>
-                ) : (
                   <Button
                     size="small"
                     danger
@@ -225,9 +214,8 @@ export function InstancesTab({ appId }: { appId: number }) {
                   >
                     Decommission
                   </Button>
-                )}
-              </Space>
-            ),
+                </Space>
+              ),
           },
         ]}
         locale={{ emptyText: 'No instances yet — add one to deploy this app to a machine.' }}

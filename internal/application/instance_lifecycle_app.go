@@ -17,13 +17,15 @@ import (
 	alertsdk "github.com/FredrickUnderwood/agenda-v2/sdk/go/alert"
 )
 
-// InstanceLifecycleApplication owns runtime lifecycle actions on a single
-// instance that are not deploys: decommission (drain gateway traffic + tear the
-// containers down, recording the intent as DesiredState=stopped) and recommission
-// (clear that intent). It reuses the exact same machinery a deploy uses — the
-// pipeline Runner, DeployLog audit trail, and the per (app, env, instance) deploy
-// lock — so a teardown and a deploy of the same instance can never race, and the
-// teardown shows up in the deploy-log UI with captured `docker` output.
+// InstanceLifecycleApplication owns decommission — the one runtime lifecycle
+// action on an instance that is not a deploy: drain gateway traffic + tear the
+// containers down, recording the intent as DesiredState=stopped. There is no
+// recommission counterpart; a decommissioned instance is brought back by simply
+// deploying it (ReleaseApplication clears the stopped state on deploy success).
+// It reuses the exact same machinery a deploy uses — the pipeline Runner,
+// DeployLog audit trail, and the per (app, env, instance) deploy lock — so a
+// teardown and a deploy of the same instance can never race, and the teardown
+// shows up in the deploy-log UI with captured `docker` output.
 //
 // It is deliberately separate from ReleaseApplication: a decommission has no
 // ApplicationRelease and no release state machine to advance. The DeployLog it
@@ -139,25 +141,12 @@ func (a *InstanceLifecycleApplication) Decommission(ctx context.Context, appID, 
 	return log, nil
 }
 
-// Recommission clears the stopped intent so the instance rejoins the deploy set
-// and health monitoring. It does NOT bring containers back up — the caller
-// triggers a normal deploy for that; recommission only makes the instance
-// eligible again. Idempotent: recommissioning a running instance is a no-op.
-func (a *InstanceLifecycleApplication) Recommission(ctx context.Context, appID, targetID int64) (*domain.ApplicationEnvTarget, error) {
-	logger.L().Info("lifecycle: recommission requested", zap.Int64("application_id", appID), zap.Int64("target_id", targetID))
-	target, err := a.appSvc.GetTargetByID(ctx, appID, targetID)
-	if err != nil {
-		return nil, err
-	}
-	if !target.Stopped() {
-		return target, nil
-	}
-	if err := a.appSvc.SetInstanceDesiredState(ctx, targetID, domain.RuntimeStateRunning); err != nil {
-		return nil, err
-	}
-	target.DesiredState = domain.RuntimeStateRunning
-	return target, nil
-}
+// There is deliberately no Recommission action. Bringing a decommissioned
+// instance back online is just a normal deploy of it: the deploy restarts the
+// containers and ReleaseApplication flips DesiredState back to running on
+// success (see syncReleaseStatus). A separate "clear the stopped flag without
+// starting containers" step was a confusing middle state, so it was removed —
+// stopped instances are restarted through the standard deploy path.
 
 // loadTarget resolves the application and the fully-attached target (gateway
 // routes + backends + health) for a decommission, without the Enabled gate

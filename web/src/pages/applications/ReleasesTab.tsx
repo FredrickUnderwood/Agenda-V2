@@ -48,7 +48,13 @@ export function ReleasesTab({ appId }: { appId: number }) {
 
   const instanceOptions = (instances?.data ?? [])
     .filter((t) => (deployEnv ? t.env === deployEnv : true) && t.enabled)
-    .map((t) => ({ value: t.instance_name, label: t.instance_name }))
+    // A stopped instance is still deployable — deploying it is how you restart a
+    // decommissioned instance — so annotate it rather than hide it. (An env-wide
+    // deploy with no instance chosen deliberately skips stopped ones server-side.)
+    .map((t) => ({
+      value: t.instance_name,
+      label: t.desired_state === 'stopped' ? `${t.instance_name} (stopped — will restart)` : t.instance_name,
+    }))
 
   const deployMutation = useMutation({
     mutationFn: (req: CreateEnvDeploymentRequest) => api.createEnvDeployment(appId, req),

@@ -37,25 +37,3 @@ func (s *Server) decommissionInstance(c *gin.Context) {
 	}
 	c.JSON(http.StatusAccepted, log)
 }
-
-// recommissionInstance clears the stopped intent so the instance rejoins the
-// deploy set and health monitoring. It does not start containers — the operator
-// triggers a normal deploy to bring the instance back.
-func (s *Server) recommissionInstance(c *gin.Context) {
-	appID, ok := paramInt64(c, "appID")
-	if !ok {
-		FailMessage(c, http.StatusBadRequest, "invalid application ID")
-		return
-	}
-	targetID, ok := paramInt64(c, "targetID")
-	if !ok {
-		FailMessage(c, http.StatusBadRequest, "invalid instance ID")
-		return
-	}
-	target, err := s.instanceLifecycleApp.Recommission(c.Request.Context(), appID, targetID)
-	if err != nil {
-		FailWith(c, http.StatusInternalServerError, err)
-		return
-	}
-	Success(c, target)
-}

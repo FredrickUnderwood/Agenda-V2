@@ -23,7 +23,7 @@ type ApplicationEnvTarget struct {
 	// app's deploy set at all; DesiredState says whether its containers should
 	// currently be running. Decommission flips it to "stopped" (tearing the
 	// containers down and draining gateway traffic) without deleting the
-	// instance record; a later deploy or Recommission returns it to "running".
+	// instance record; deploying the instance again returns it to "running".
 	//
 	// It is a string enum, not a bool, deliberately: a `gorm:"default:true"`
 	// bool cannot persist an explicit false via Create (the zero value is
