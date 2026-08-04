@@ -74,6 +74,11 @@ export interface ApplicationEnvTarget {
   machine_id: number
   port: number
   enabled: boolean
+  // 'running' | 'stopped' — the operator's runtime intent, orthogonal to
+  // `enabled`. A decommissioned instance is 'stopped': its containers are torn
+  // down and it is drained from the gateway, but the record survives so it can
+  // be brought back. Rows predating this field read as 'running'.
+  desired_state?: RuntimeState
   health_check_enabled: boolean
   health_check_type: string
   health_check_scheme: string
@@ -91,6 +96,8 @@ export interface ApplicationEnvTarget {
   gateway_routes?: ApplicationGatewayRoute[]
   health?: ApplicationInstanceHealth | null
 }
+
+export type RuntimeState = 'running' | 'stopped'
 
 export interface CreateApplicationRequest {
   name: string

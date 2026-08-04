@@ -55,6 +55,25 @@ type NodeHeartbeatRequest struct {
 // from the same host path — defined once here so the two ends can't drift.
 const AgendaContainerLogDir = "/var/log/agenda"
 
+// Container labels the compose-override step stamps on every augmented service,
+// mirroring the AGENDA_* env vars but in a form docker can filter on (env vars
+// can't drive `docker ps --filter`). They give teardown a branch-independent,
+// orphan-proof handle on exactly one instance's containers:
+//
+//	docker ps -aq --filter label=com.agenda.app=X \
+//	              --filter label=com.agenda.env=Y \
+//	              --filter label=com.agenda.instance=Z
+//
+// The compose project name embeds the branch, so it drifts when an instance is
+// redeployed from a new branch; these labels are keyed on the stable
+// (app, env, instance) identity instead, so a decommission can find every
+// container the instance ever left behind regardless of branch.
+const (
+	LabelApp      = "com.agenda.app"
+	LabelEnv      = "com.agenda.env"
+	LabelInstance = "com.agenda.instance"
+)
+
 // AgendaContainerMetricsAddr is the fixed in-container listen address
 // sdk/go/metric's AGENDA_METRICS_ADDR points at when a target has
 // MetricsEnabled. The operator-chosen HOST port is separate

@@ -10,26 +10,41 @@ import (
 // given env (application_id, env, instance_name) unique. It is the unit that
 // Release/deploy/health-check/gateway-route all key off.
 type ApplicationEnvTarget struct {
-	ID                          int64       `json:"id"                                   gorm:"primaryKey;autoIncrement"`
-	ApplicationID               int64       `json:"application_id"                       gorm:"uniqueIndex:idx_app_env_target_app_env_instance;index;not null"`
-	Env                         Environment `json:"env"                                  gorm:"uniqueIndex:idx_app_env_target_app_env_instance;index;size:16;not null"`
-	InstanceName                string      `json:"instance_name"                        gorm:"uniqueIndex:idx_app_env_target_app_env_instance;size:64;not null;default:'default'"`
-	DisplayName                 string      `json:"display_name"                         gorm:"size:128;not null;default:''"`
-	MachineID                   int64       `json:"machine_id"                           gorm:"index:idx_app_env_target_machine_port;not null;default:0"`
-	Port                        int         `json:"port"                                 gorm:"index:idx_app_env_target_machine_port;not null;default:0"`
-	Enabled                     bool        `json:"enabled"                              gorm:"index:idx_app_env_target_health;not null;default:true"`
-	HealthCheckEnabled          bool        `json:"health_check_enabled"                 gorm:"index:idx_app_env_target_health;not null;default:false"`
-	HealthCheckType             string      `json:"health_check_type"                    gorm:"size:16;not null;default:'http'"`
-	HealthCheckScheme           string      `json:"health_check_scheme"                  gorm:"size:16;not null;default:'http'"`
-	HealthCheckHost             string      `json:"health_check_host"                    gorm:"size:255;not null;default:''"`
-	HealthCheckURL              string      `json:"health_check_url"                     gorm:"size:1024;not null;default:''"`
-	HealthCheckPath             string      `json:"health_check_path"                    gorm:"size:255;not null;default:'/healthz'"`
-	HealthCheckMethod           string      `json:"health_check_method"                  gorm:"size:16;not null;default:'GET'"`
-	HealthCheckExpectedStatus   int         `json:"health_check_expected_status"         gorm:"not null;default:200"`
-	HealthCheckTimeoutMS        int         `json:"health_check_timeout_ms"              gorm:"not null;default:3000"`
-	HealthCheckIntervalSec      int         `json:"health_check_interval_sec"            gorm:"not null;default:30"`
-	HealthCheckFailureThreshold int         `json:"health_check_failure_threshold"       gorm:"not null;default:3"`
-	HealthCheckSuccessThreshold int         `json:"health_check_success_threshold"       gorm:"not null;default:1"`
+	ID            int64       `json:"id"                                   gorm:"primaryKey;autoIncrement"`
+	ApplicationID int64       `json:"application_id"                       gorm:"uniqueIndex:idx_app_env_target_app_env_instance;index;not null"`
+	Env           Environment `json:"env"                                  gorm:"uniqueIndex:idx_app_env_target_app_env_instance;index;size:16;not null"`
+	InstanceName  string      `json:"instance_name"                        gorm:"uniqueIndex:idx_app_env_target_app_env_instance;size:64;not null;default:'default'"`
+	DisplayName   string      `json:"display_name"                         gorm:"size:128;not null;default:''"`
+	MachineID     int64       `json:"machine_id"                           gorm:"index:idx_app_env_target_machine_port;not null;default:0"`
+	Port          int         `json:"port"                                 gorm:"index:idx_app_env_target_machine_port;not null;default:0"`
+	Enabled       bool        `json:"enabled"                              gorm:"index:idx_app_env_target_health;not null;default:true"`
+	// DesiredState is the operator's runtime intent for this instance,
+	// orthogonal to Enabled: Enabled says whether the instance is part of the
+	// app's deploy set at all; DesiredState says whether its containers should
+	// currently be running. Decommission flips it to "stopped" (tearing the
+	// containers down and draining gateway traffic) without deleting the
+	// instance record; a later deploy or Recommission returns it to "running".
+	//
+	// It is a string enum, not a bool, deliberately: a `gorm:"default:true"`
+	// bool cannot persist an explicit false via Create (the zero value is
+	// indistinguishable from unset), a trap that has already bitten this
+	// codebase. A string default sidesteps it, and leaves room for future
+	// states (e.g. "paused"). It is managed only by the lifecycle path — the
+	// normal target Upsert deliberately omits this column so a config edit
+	// never resurrects a decommissioned instance.
+	DesiredState                RuntimeState `json:"desired_state"                       gorm:"size:16;not null;default:'running'"`
+	HealthCheckEnabled          bool         `json:"health_check_enabled"                 gorm:"index:idx_app_env_target_health;not null;default:false"`
+	HealthCheckType             string       `json:"health_check_type"                    gorm:"size:16;not null;default:'http'"`
+	HealthCheckScheme           string       `json:"health_check_scheme"                  gorm:"size:16;not null;default:'http'"`
+	HealthCheckHost             string       `json:"health_check_host"                    gorm:"size:255;not null;default:''"`
+	HealthCheckURL              string       `json:"health_check_url"                     gorm:"size:1024;not null;default:''"`
+	HealthCheckPath             string       `json:"health_check_path"                    gorm:"size:255;not null;default:'/healthz'"`
+	HealthCheckMethod           string       `json:"health_check_method"                  gorm:"size:16;not null;default:'GET'"`
+	HealthCheckExpectedStatus   int          `json:"health_check_expected_status"         gorm:"not null;default:200"`
+	HealthCheckTimeoutMS        int          `json:"health_check_timeout_ms"              gorm:"not null;default:3000"`
+	HealthCheckIntervalSec      int          `json:"health_check_interval_sec"            gorm:"not null;default:30"`
+	HealthCheckFailureThreshold int          `json:"health_check_failure_threshold"       gorm:"not null;default:3"`
+	HealthCheckSuccessThreshold int          `json:"health_check_success_threshold"       gorm:"not null;default:1"`
 	// MetricsEnabled/MetricsPort opt this target into custom app metrics: when
 	// enabled, the deploy pipeline injects AGENDA_METRICS_ADDR into every
 	// service's container (sdk/go/metric listens there) and passes
@@ -51,6 +66,22 @@ type ApplicationEnvTarget struct {
 }
 
 func (ApplicationEnvTarget) TableName() string { return "application_env_target" }
+
+// RuntimeState is ApplicationEnvTarget.DesiredState — the operator's intent for
+// whether an instance's containers should be running.
+type RuntimeState string
+
+const (
+	RuntimeStateRunning RuntimeState = "running"
+	RuntimeStateStopped RuntimeState = "stopped"
+)
+
+// Stopped reports whether the instance has been decommissioned (DesiredState ==
+// stopped). Rows predating this column persist the "running" default, so a nil
+// or empty value reads as running.
+func (t *ApplicationEnvTarget) Stopped() bool {
+	return t != nil && t.DesiredState == RuntimeStateStopped
+}
 
 // ParseEnvOverride decodes the instance-level env var override layer. Never
 // returns a nil map, so callers can merge unconditionally.

@@ -143,6 +143,14 @@ func (s *ApplicationReleaseService) Get(ctx context.Context, id int64) (*domain.
 	return s.releases.GetByID(ctx, id)
 }
 
+// GetLatestVerified returns the most recent verified release for one
+// (app, env, instance), or nil when the instance has never had a successful
+// deploy. Used to resolve an instance's current running branch (e.g. for the
+// decommission compose project name).
+func (s *ApplicationReleaseService) GetLatestVerified(ctx context.Context, appID int64, env domain.Environment, instanceName string) (*domain.ApplicationRelease, error) {
+	return s.releases.GetLatestVerified(ctx, appID, env, domain.NormalizeInstanceName(instanceName))
+}
+
 type ListReleasesFilter = repository.ListReleasesFilter
 
 func (s *ApplicationReleaseService) List(ctx context.Context, f ListReleasesFilter) ([]*domain.ApplicationRelease, error) {

@@ -227,6 +227,29 @@ func (s *ApplicationService) GetTargetForEnvInstance(ctx context.Context, appID 
 	return target, nil
 }
 
+// GetTargetByID resolves one instance by its target ID and asserts it belongs
+// to appID (the URL path carries both, so a mismatch is a client error, not a
+// silent cross-application read). Unlike GetTargetForEnvInstance it does not
+// require Enabled — the lifecycle path must be able to load an instance in any
+// state to act on it.
+func (s *ApplicationService) GetTargetByID(ctx context.Context, appID, targetID int64) (*domain.ApplicationEnvTarget, error) {
+	target, err := s.targets.GetByID(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if target.ApplicationID != appID {
+		return nil, errors.New(fmt.Sprintf("application %d has no instance %d", appID, targetID))
+	}
+	return target, nil
+}
+
+// SetInstanceDesiredState records the operator's runtime intent for an instance
+// (running/stopped). It owns the desired_state column exclusively; see
+// ApplicationTargetRepository.UpdateDesiredState.
+func (s *ApplicationService) SetInstanceDesiredState(ctx context.Context, targetID int64, state domain.RuntimeState) error {
+	return s.targets.UpdateDesiredState(ctx, targetID, state)
+}
+
 func (s *ApplicationService) ListTargetsByApplication(ctx context.Context, appID int64, env domain.Environment) ([]*domain.ApplicationEnvTarget, error) {
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {

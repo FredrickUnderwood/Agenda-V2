@@ -56,6 +56,36 @@ func TestBuildOverrideYAML_PerServiceEnvDisambiguation(t *testing.T) {
 	}
 }
 
+func TestBuildOverrideYAML_StampsAgendaLabels(t *testing.T) {
+	raw, err := buildOverrideYAML("./logs", "myapp", "main", "prod", "blue", "", []string{"api", "worker"}, nil)
+	if err != nil {
+		t.Fatalf("buildOverrideYAML: %v", err)
+	}
+	var out struct {
+		Services map[string]struct {
+			Labels []string `yaml:"labels"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal override: %v", err)
+	}
+	// Every augmented service must carry the (app, env, instance) identity as
+	// docker-filterable labels, so a decommission can pick out exactly this
+	// instance's containers regardless of branch.
+	for _, svcName := range []string{"api", "worker"} {
+		labels := out.Services[svcName].Labels
+		for _, want := range []string{
+			contract.LabelApp + "=myapp",
+			contract.LabelEnv + "=prod",
+			contract.LabelInstance + "=blue",
+		} {
+			if !contains(labels, want) {
+				t.Errorf("service %q labels missing %q, got %v", svcName, want, labels)
+			}
+		}
+	}
+}
+
 func TestBuildOverrideYAML_MetricsAddr(t *testing.T) {
 	raw, err := buildOverrideYAML("./logs", "myapp", "main", "prod", "default", ":9464", []string{"api"}, nil)
 	if err != nil {

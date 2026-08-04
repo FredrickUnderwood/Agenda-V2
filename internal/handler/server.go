@@ -16,25 +16,26 @@ import (
 )
 
 type Server struct {
-	cfg             *config.Config
-	engine          *gin.Engine
-	appSvc          *service.ApplicationService
-	healthSvc       *service.ApplicationHealthService
-	envSvc          *service.ApplicationEnvironmentService
-	releaseSvc      *service.ApplicationReleaseService
-	envDeploySvc    *service.EnvDeploymentService
-	machineSvc      *service.MachineService
-	logSvc          *service.DeployLogService
-	appLogSvc       *service.ApplicationLogService
-	appMetricsSvc   *service.ApplicationMetricsService
-	settingSvc      *service.SettingService
-	alertSvc        *service.AlertService
-	alertRuleSvc    *service.AlertRuleService
-	notificationSvc *service.NotificationService
-	userSvc         *service.UserService
-	auth            *auth.Manager
-	releaseApp      *application.ReleaseApplication
-	httpServer      *http.Server
+	cfg                  *config.Config
+	engine               *gin.Engine
+	appSvc               *service.ApplicationService
+	healthSvc            *service.ApplicationHealthService
+	envSvc               *service.ApplicationEnvironmentService
+	releaseSvc           *service.ApplicationReleaseService
+	envDeploySvc         *service.EnvDeploymentService
+	machineSvc           *service.MachineService
+	logSvc               *service.DeployLogService
+	appLogSvc            *service.ApplicationLogService
+	appMetricsSvc        *service.ApplicationMetricsService
+	settingSvc           *service.SettingService
+	alertSvc             *service.AlertService
+	alertRuleSvc         *service.AlertRuleService
+	notificationSvc      *service.NotificationService
+	userSvc              *service.UserService
+	auth                 *auth.Manager
+	releaseApp           *application.ReleaseApplication
+	instanceLifecycleApp *application.InstanceLifecycleApplication
+	httpServer           *http.Server
 }
 
 func NewServer(
@@ -55,6 +56,7 @@ func NewServer(
 	userSvc *service.UserService,
 	authMgr *auth.Manager,
 	releaseApp *application.ReleaseApplication,
+	instanceLifecycleApp *application.InstanceLifecycleApplication,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
@@ -62,6 +64,7 @@ func NewServer(
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc, envDeploySvc: envDeploySvc,
 		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, appMetricsSvc: appMetricsSvc, settingSvc: settingSvc,
 		alertSvc: alertSvc, alertRuleSvc: alertRuleSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
+		instanceLifecycleApp: instanceLifecycleApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
 	s.engine.Use(ginzap.RecoveryWithZap(logger.L(), true))
@@ -129,6 +132,8 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:appID/instances/:targetID/health", s.getApplicationInstanceHealth)
 		apps.POST("/:appID/instances/:targetID/health/check", s.checkApplicationInstanceHealth)
 		apps.GET("/:appID/instances/:targetID/logs", s.getApplicationInstanceLogs)
+		apps.POST("/:appID/instances/:targetID/decommission", s.decommissionInstance)
+		apps.POST("/:appID/instances/:targetID/recommission", s.recommissionInstance)
 		apps.GET("/:appID/environments/:env", s.getApplicationEnvironment)
 		apps.PUT("/:appID/environments/:env", s.updateApplicationEnvironment)
 		apps.GET("/:appID/releases", s.listReleases)

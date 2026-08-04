@@ -146,6 +146,249 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 	return bps, localPath, nil
 }
 
+// BuildTeardown returns the blueprint list for decommissioning one instance:
+// drain its gateway traffic, then remove its containers. Unlike Build it clones
+// nothing and brings nothing up. The returned localPath is present only to
+// satisfy the Runner (no teardown step reads it).
+//
+// The caller must have already marked the target's DesiredState=stopped before
+// calling this: the drain re-resolves all_enabled/selected routes over the
+// surviving instances via the same ListTargetsByApplication path a deploy uses,
+// and that exclusion relies on the stopped flag being visible there.
+func (b *Builder) BuildTeardown(ctx context.Context, target *domain.DeployTarget) ([]Blueprint, string, error) {
+	step, localPath, machine, dockerCfg, err := b.resolveContainerTeardown(ctx, target)
+	if err != nil {
+		return nil, "", err
+	}
+
+	bps := make([]Blueprint, 0, 2)
+	drain, err := b.buildGatewayDrain(ctx, target, dockerCfg, machine)
+	if err != nil {
+		return nil, "", err
+	}
+	if drain.Exec != nil {
+		bps = append(bps, drain)
+	}
+	bps = append(bps, step)
+	return bps, localPath, nil
+}
+
+// BuildContainerTeardownStep returns just the compose_down step for an instance,
+// without the gateway-drain step BuildTeardown prepends. It is the background
+// reconcile path (finishing a teardown a machine was offline for): the gateway
+// was already drained when the decommission was first requested — that call
+// reaches the gateway, not the machine, so it succeeds even while the machine is
+// down — so recovery only needs to re-attempt the container removal, and must
+// not depend on gateway config being present.
+func (b *Builder) BuildContainerTeardownStep(ctx context.Context, target *domain.DeployTarget) (Blueprint, string, error) {
+	step, localPath, _, _, err := b.resolveContainerTeardown(ctx, target)
+	if err != nil {
+		return Blueprint{}, "", err
+	}
+	return step, localPath, nil
+}
+
+// resolveContainerTeardown resolves the machine, compose project name and an
+// inert localPath for an instance and assembles its compose_down Blueprint.
+// Shared by BuildTeardown (decommission) and BuildContainerTeardownStep
+// (reconcile) so the two can never drift on how containers are identified.
+func (b *Builder) resolveContainerTeardown(ctx context.Context, target *domain.DeployTarget) (Blueprint, string, *config.MachineConfig, *domain.DockerDeployConfig, error) {
+	if target.App.DeployMethod != domain.DeployMethodDocker {
+		return Blueprint{}, "", nil, nil, errors.New("only docker-method applications have containers to decommission")
+	}
+	dockerCfg, err := target.App.ParseDockerConfig()
+	if err != nil {
+		return Blueprint{}, "", nil, nil, err
+	}
+	machine, err := b.resolveDockerMachine(ctx, dockerCfg, target.EnvTarget)
+	if err != nil {
+		return Blueprint{}, "", nil, nil, err
+	}
+
+	instanceName := targetInstanceName(target)
+	// projectName mirrors buildDocker's and needs the branch, which the caller
+	// resolves from the instance's current running release. Empty branch → empty
+	// projectName → ComposeDownStep relies on the agenda labels alone.
+	projectName := ""
+	if target.Branch != "" {
+		projectName = util.Slug(target.App.Name) + "-" + util.Slug(target.Branch) + "-" + util.Slug(string(target.Env())) + "-" + util.Slug(instanceName)
+	}
+
+	// localPath is unused by teardown steps but Runner requires it non-empty.
+	// Resolve best-effort; fall back to the workspace root when the branch is
+	// unknown (ResolveLocalPath needs a branch).
+	localPath := ""
+	if target.Branch != "" {
+		if lp, lpErr := b.resolveLocalPath(target, machine); lpErr == nil {
+			localPath = lp
+		}
+	}
+	if localPath == "" {
+		localPath = b.workspaceRoot(machine)
+	}
+
+	step := Blueprint{
+		Name: "compose_down", Type: domain.StepTypeComposeDown,
+		Exec: &ComposeDownStep{
+			Machine:      machine,
+			AppName:      target.App.Name,
+			EnvName:      string(target.Env()),
+			InstanceName: instanceName,
+			ProjectName:  projectName,
+		},
+	}
+	return step, localPath, machine, dockerCfg, nil
+}
+
+// workspaceRoot returns the resolved workspace root for a machine (machine
+// override, else global), used as an inert non-empty localPath for teardown.
+func (b *Builder) workspaceRoot(machine *config.MachineConfig) string {
+	if machine != nil && machine.WorkspaceRoot != "" {
+		return machine.WorkspaceRoot
+	}
+	if b.cfg.WorkspaceRoot != "" {
+		return b.cfg.WorkspaceRoot
+	}
+	return "/tmp"
+}
+
+// buildGatewayDrain builds the gateway-drain step for a decommission: for every
+// app+env route, re-point it away from the instance being torn down. single-mode
+// routes (the common one-instance case) have no other backend, so they are
+// disabled; all_enabled/selected routes are re-resolved over the surviving
+// instances (the caller has marked this instance stopped, so resolveRouteBackends
+// skips it) and disabled only when no survivor remains.
+//
+// The gateway rejects an upsert with zero backends, so a route being disabled
+// still carries a single self placeholder backend (with Enabled/Healthy false
+// and no proxy fields, so the step never tries to register the dying instance's
+// node). A disabled route is not served (LoadEnabledRoutes filters on status),
+// so that placeholder never receives traffic.
+//
+// Returns an empty Blueprint (Exec nil) when gateway integration is off or the
+// app has no routes.
+func (b *Builder) buildGatewayDrain(ctx context.Context, target *domain.DeployTarget, dockerCfg *domain.DockerDeployConfig, machine *config.MachineConfig) (Blueprint, error) {
+	if !b.cfg.Gateway.Enabled {
+		return Blueprint{}, nil
+	}
+	routes := target.EnvTarget.GatewayRoutes
+	if len(routes) == 0 {
+		return Blueprint{}, nil
+	}
+	if b.cfg.Gateway.BaseURL == "" {
+		return Blueprint{}, errors.New("gateway.base_url is required when gateway route is enabled")
+	}
+	if b.cfg.Gateway.ServiceToken == "" {
+		return Blueprint{}, errors.New("gateway.service_token is required when gateway route is enabled")
+	}
+	scheme := b.cfg.Gateway.BackendScheme
+	if scheme == "" {
+		scheme = "http"
+	}
+
+	var siblings []*domain.ApplicationEnvTarget
+	siblingsLoaded := false
+	loadSiblings := func() ([]*domain.ApplicationEnvTarget, error) {
+		if siblingsLoaded {
+			return siblings, nil
+		}
+		siblingsLoaded = true
+		if b.targetLister == nil {
+			return nil, nil
+		}
+		list, err := b.targetLister.ListTargetsByApplication(ctx, target.App.ID, target.Env())
+		if err != nil {
+			return nil, err
+		}
+		siblings = list
+		return siblings, nil
+	}
+
+	specs := make([]GatewayRouteSpec, 0, len(routes))
+	for _, route := range routes {
+		if route == nil || route.RouteKey == "" {
+			continue
+		}
+		pathPrefix := route.PathPrefix
+		if pathPrefix == "" {
+			pathPrefix = "/"
+		}
+		var backends []GatewayBackendSpec
+		switch route.BackendMode {
+		case "", domain.GatewayBackendModeSingle:
+			// The decommissioning instance was this route's only backend; there is
+			// nothing to fail over to, so disable it below.
+			backends = nil
+		default:
+			bs, err := b.resolveRouteBackends(ctx, route, target.App.Name, dockerCfg, scheme, GatewayBackendSpec{}, loadSiblings)
+			if err != nil {
+				return Blueprint{}, err
+			}
+			backends = bs
+		}
+		enabled := len(backends) > 0
+		if !enabled {
+			// Keep a self placeholder so the upsert validates; the disabled status
+			// keeps it out of the served set.
+			backends = []GatewayBackendSpec{b.drainSelfPlaceholder(target, machine, scheme, route.BackendPath)}
+		}
+		instanceSelectMode := route.InstanceSelectMode
+		if instanceSelectMode == "" {
+			instanceSelectMode = domain.GatewayInstanceSelectModeDisabled
+		}
+		instanceHeader := route.InstanceHeader
+		if instanceHeader == "" {
+			instanceHeader = domain.DefaultGatewayInstanceHeader
+		}
+		specs = append(specs, GatewayRouteSpec{
+			RouteKey:           route.RouteKey,
+			Host:               route.Host,
+			PathPrefix:         pathPrefix,
+			StripPrefix:        route.StripPrefix,
+			Enabled:            enabled,
+			InstanceSelectMode: string(instanceSelectMode),
+			InstanceHeader:     instanceHeader,
+			Backends:           backends,
+		})
+	}
+	if len(specs) == 0 {
+		return Blueprint{}, nil
+	}
+	return Blueprint{
+		Name: "gateway_drain",
+		Type: domain.StepTypeGatewayDrain,
+		Exec: &GatewayRouteSyncStep{
+			Client:        gatewayclient.NewClient(b.cfg.Gateway),
+			ApplicationID: target.App.ID,
+			ServiceName:   target.App.Name,
+			Env:           string(target.Env()),
+			Routes:        specs,
+		},
+	}, nil
+}
+
+// drainSelfPlaceholder builds an inert backend for the instance being torn down,
+// used only to satisfy the gateway's "at least one backend" rule on a route that
+// is being disabled. It deliberately carries no Proxy* fields so the sync step
+// never attempts to register the dying instance's node, and a direct host:port
+// URL (never a node proxy path) so it stays structurally valid without any live
+// dependency.
+func (b *Builder) drainSelfPlaceholder(target *domain.DeployTarget, machine *config.MachineConfig, scheme, backendPath string) GatewayBackendSpec {
+	instanceName := targetInstanceName(target)
+	port := 0
+	if target.EnvTarget != nil {
+		port = target.EnvTarget.Port
+	}
+	host := b.resolveBackendHost(machine)
+	return GatewayBackendSpec{
+		InstanceName: instanceName,
+		TargetKey:    util.Slug(target.App.Name) + "-" + util.Slug(string(target.Env())) + "-" + util.Slug(instanceName) + "-" + strconv.Itoa(port),
+		URL:          backendURL(scheme, host, port, backendPath),
+		Weight:       1,
+		Healthy:      false,
+	}
+}
+
 // mergeEnv layers application-level baseline (DockerDeployConfig.Env) <
 // env-level (ApplicationEnvironment.EnvVars) < instance-level
 // (ApplicationEnvTarget.EnvOverride), later layers winning on key conflict.
@@ -377,7 +620,7 @@ func (b *Builder) resolveRouteBackends(
 		}
 		backends := make([]GatewayBackendSpec, 0, len(siblings))
 		for _, sibling := range siblings {
-			if !sibling.Enabled {
+			if !sibling.Enabled || sibling.Stopped() {
 				continue
 			}
 			backend, ok := b.backendSpecForTarget(ctx, sibling, appName, dockerCfg, scheme, route.BackendPath, 1)
@@ -402,7 +645,7 @@ func (b *Builder) resolveRouteBackends(
 				continue
 			}
 			sibling, ok := byID[selected.TargetID]
-			if !ok || !sibling.Enabled {
+			if !ok || !sibling.Enabled || sibling.Stopped() {
 				continue
 			}
 			weight := selected.Weight

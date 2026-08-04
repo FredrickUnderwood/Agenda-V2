@@ -69,6 +69,13 @@ func (s *ApplicationHealthService) CheckTarget(ctx context.Context, target *doma
 	if !target.Enabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", target.Env, target.InstanceName))
 	}
+	// A decommissioned instance has no containers to probe; checking it would
+	// flap to unhealthy and fire a spurious alert during/after teardown. The
+	// monitor still lists it (enabled + health_check_enabled remain set), so the
+	// guard lives here rather than in the SQL filter.
+	if target.Stopped() {
+		return nil, errors.New(fmt.Sprintf("%s/%s instance is stopped", target.Env, target.InstanceName))
+	}
 	if !target.HealthCheckEnabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s health check is disabled", target.Env, target.InstanceName))
 	}

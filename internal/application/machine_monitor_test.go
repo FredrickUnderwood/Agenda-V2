@@ -48,6 +48,24 @@ func (f *fakeProxyResyncer) callCount() int {
 	return len(f.calls)
 }
 
+type fakeInstanceReconciler struct {
+	mu    sync.Mutex
+	calls []int64
+}
+
+func (f *fakeInstanceReconciler) ReconcileStopped(_ context.Context, id int64) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, id)
+	return 0, nil
+}
+
+func (f *fakeInstanceReconciler) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func agentMachine(id int64, name string, online bool) service.MachineView {
 	hb := time.Now()
 	return service.MachineView{
@@ -76,7 +94,7 @@ func newMachineTestMonitor(t *testing.T) (*MachineMonitor, *fakeMachineLister, c
 
 	lister := &fakeMachineLister{}
 	resync := &fakeProxyResyncer{}
-	mon := NewMachineMonitor(lister, alertSvc, resync, time.Second)
+	mon := NewMachineMonitor(lister, alertSvc, resync, nil, time.Second)
 	return mon, lister, captured, resync
 }
 
@@ -168,6 +186,44 @@ func TestMachineMonitor_ResyncsOnlineAgentEachTick(t *testing.T) {
 	mon.evaluateOnce()
 	if resync.callCount() != 3 {
 		t.Fatalf("expected a resync each tick for an online agent, got %d", resync.callCount())
+	}
+}
+
+func TestMachineMonitor_ReconcilesStoppedOnlyOnRecovery(t *testing.T) {
+	mon, lister, _, _ := newMachineTestMonitor(t)
+	reconciler := &fakeInstanceReconciler{}
+	mon.instanceReconcile = reconciler
+
+	// First observation of an online machine reconciles once (a decommission may
+	// have failed to reach it before this process started)...
+	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
+	mon.evaluateOnce()
+	if reconciler.callCount() != 1 {
+		t.Fatalf("expected one reconcile on first online observation, got %d", reconciler.callCount())
+	}
+	// ...but a steadily-online machine must NOT reconcile every tick (unlike
+	// proxy resync): a teardown stays done once it succeeds.
+	mon.evaluateOnce()
+	mon.evaluateOnce()
+	if reconciler.callCount() != 1 {
+		t.Fatalf("expected no reconcile while staying online, got %d", reconciler.callCount())
+	}
+
+	// Go offline (no reconcile while offline)...
+	lister.set([]service.MachineView{agentMachine(1, "node-a", false)})
+	mon.evaluateOnce()
+	if reconciler.callCount() != 1 {
+		t.Fatalf("expected no reconcile while offline, got %d", reconciler.callCount())
+	}
+
+	// ...then recover: the offline->online edge reconciles again.
+	lister.set([]service.MachineView{agentMachine(1, "node-a", true)})
+	mon.evaluateOnce()
+	if reconciler.callCount() != 2 {
+		t.Fatalf("expected a reconcile on recovery edge, got %d", reconciler.callCount())
+	}
+	if last := reconciler.calls[len(reconciler.calls)-1]; last != 1 {
+		t.Fatalf("expected reconcile for machine 1, got %d", last)
 	}
 }
 

@@ -4,6 +4,7 @@ import type {
   ApplicationEnvTarget,
   ApplicationInstanceHealth,
   CreateApplicationRequest,
+  DeployLog,
   Environment,
   ListResponse,
   NodeLogsResponse,
@@ -51,5 +52,22 @@ export function checkInstanceHealth(appId: number, targetId: number) {
 export function getInstanceLogs(appId: number, targetId: number, opts?: { service?: string; tail?: number }) {
   return apiClient
     .get<NodeLogsResponse>(`/applications/${appId}/instances/${targetId}/logs`, { params: opts })
+    .then((r) => r.data)
+}
+
+// decommissionInstance drains the instance's gateway traffic and tears its
+// containers down (DesiredState=stopped). Returns 202 with the teardown
+// DeployLog, whose steps run asynchronously — poll the deploy log for progress.
+export function decommissionInstance(appId: number, targetId: number) {
+  return apiClient
+    .post<DeployLog>(`/applications/${appId}/instances/${targetId}/decommission`)
+    .then((r) => r.data)
+}
+
+// recommissionInstance clears the stopped intent so the instance rejoins the
+// deploy set; it does not start containers (trigger a deploy for that).
+export function recommissionInstance(appId: number, targetId: number) {
+  return apiClient
+    .post<ApplicationEnvTarget>(`/applications/${appId}/instances/${targetId}/recommission`)
     .then((r) => r.data)
 }

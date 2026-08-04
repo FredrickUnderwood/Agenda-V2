@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Form, Input, InputNumber, Modal, Select, Switch, Table, Tag } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { App, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import { PlusOutlined, ReloadOutlined, PoweroffOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import * as api from '@/api/applications'
 import * as machinesApi from '@/api/machines'
@@ -11,8 +11,44 @@ import { RefreshButton } from '@/components/RefreshButton'
 import { errorMessage } from '@/utils/errorMessage'
 import { buildTargetsPayload } from './targetPayload'
 
+// routesLosingLastBackend returns the route keys that would be left with no
+// serving backend if `target` were decommissioned — i.e. routes where this
+// instance is the only enabled, running backend. Used to warn the operator that
+// decommissioning will take those routes offline (502).
+//
+// It reasons off the same app+env route list the backend attaches to every
+// target: a single-mode route always resolves to just the instance it is shown
+// on, so it is always at risk; an all_enabled/selected route is at risk only
+// when every other participating instance is disabled or already stopped.
+function routesLosingLastBackend(
+  target: ApplicationEnvTarget,
+  siblings: ApplicationEnvTarget[],
+): string[] {
+  const routes = target.gateway_routes ?? []
+  const others = siblings.filter(
+    (s) => s.id !== target.id && s.env === target.env && s.enabled && s.desired_state !== 'stopped',
+  )
+  const atRisk: string[] = []
+  for (const route of routes) {
+    if (!route.enabled) continue
+    if (route.backend_mode === 'single') {
+      atRisk.push(route.route_key)
+      continue
+    }
+    if (route.backend_mode === 'selected') {
+      const selectedIds = new Set((route.backends ?? []).filter((b) => b.enabled).map((b) => b.target_id))
+      const survivor = others.some((o) => selectedIds.has(o.id))
+      if (!survivor) atRisk.push(route.route_key)
+      continue
+    }
+    // all_enabled: any other enabled+running instance keeps it serving.
+    if (others.length === 0) atRisk.push(route.route_key)
+  }
+  return atRisk
+}
+
 export function InstancesTab({ appId }: { appId: number }) {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [form] = Form.useForm<ApplicationEnvTargetRequest>()
@@ -42,6 +78,53 @@ export function InstancesTab({ appId }: { appId: number }) {
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
 
+  const decommissionMutation = useMutation({
+    mutationFn: (targetId: number) => api.decommissionInstance(appId, targetId),
+    onSuccess: () => {
+      message.success('Instance is being decommissioned — traffic drained, containers tearing down.')
+      queryClient.invalidateQueries({ queryKey: ['applications', appId, 'instances'] })
+    },
+    onError: (err: unknown) => message.error(errorMessage(err)),
+  })
+
+  const recommissionMutation = useMutation({
+    mutationFn: (targetId: number) => api.recommissionInstance(appId, targetId),
+    onSuccess: () => {
+      message.success('Instance recommissioned — deploy it to bring the containers back.')
+      queryClient.invalidateQueries({ queryKey: ['applications', appId, 'instances'] })
+    },
+    onError: (err: unknown) => message.error(errorMessage(err)),
+  })
+
+  const instances = data?.data ?? []
+
+  const confirmDecommission = (record: ApplicationEnvTarget) => {
+    const atRisk = routesLosingLastBackend(record, instances)
+    modal.confirm({
+      title: `Decommission ${record.env}/${record.instance_name}?`,
+      okText: 'Decommission',
+      okButtonProps: { danger: true },
+      width: 520,
+      content: (
+        <div>
+          <Typography.Paragraph style={{ marginBottom: atRisk.length ? 12 : 0 }}>
+            This drains the instance from the gateway and tears its containers down. The instance
+            record and its logs are kept — you can bring it back later by deploying it again. Named
+            data volumes (databases, etc.) are preserved.
+          </Typography.Paragraph>
+          {atRisk.length > 0 && (
+            <Typography.Paragraph type="danger" style={{ marginBottom: 0 }}>
+              ⚠ This instance is the only serving backend for {atRisk.length === 1 ? 'route' : 'routes'}{' '}
+              <span className="agenda-mono">{atRisk.join(', ')}</span> — decommissioning will take{' '}
+              {atRisk.length === 1 ? 'it' : 'them'} offline (502) until another instance is deployed.
+            </Typography.Paragraph>
+          )}
+        </div>
+      ),
+      onOk: () => decommissionMutation.mutateAsync(record.id),
+    })
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
@@ -54,7 +137,7 @@ export function InstancesTab({ appId }: { appId: number }) {
       <Table<ApplicationEnvTarget>
         rowKey="id"
         loading={isLoading}
-        dataSource={data?.data ?? []}
+        dataSource={instances}
         pagination={false}
         columns={[
           { title: 'Env', dataIndex: 'env', render: (v) => <Tag>{v}</Tag> },
@@ -69,6 +152,16 @@ export function InstancesTab({ appId }: { appId: number }) {
             title: 'Enabled',
             dataIndex: 'enabled',
             render: (v: boolean) => (v ? <StatusPill status="verified" label="enabled" /> : <StatusPill status="idle" label="disabled" />),
+          },
+          {
+            title: 'State',
+            key: 'desired_state',
+            render: (_, record) =>
+              record.desired_state === 'stopped' ? (
+                <StatusPill status="failed" label="stopped" />
+              ) : (
+                <StatusPill status="verified" label="running" />
+              ),
           },
           {
             title: 'Health',
@@ -95,14 +188,36 @@ export function InstancesTab({ appId }: { appId: number }) {
             title: '',
             key: 'actions',
             render: (_, record) => (
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                loading={checkHealthMutation.isPending && checkHealthMutation.variables === record.id}
-                onClick={() => checkHealthMutation.mutate(record.id)}
-              >
-                Check health
-              </Button>
+              <Space size="small">
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={checkHealthMutation.isPending && checkHealthMutation.variables === record.id}
+                  onClick={() => checkHealthMutation.mutate(record.id)}
+                >
+                  Check health
+                </Button>
+                {record.desired_state === 'stopped' ? (
+                  <Button
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    loading={recommissionMutation.isPending && recommissionMutation.variables === record.id}
+                    onClick={() => recommissionMutation.mutate(record.id)}
+                  >
+                    Recommission
+                  </Button>
+                ) : (
+                  <Button
+                    size="small"
+                    danger
+                    icon={<PoweroffOutlined />}
+                    loading={decommissionMutation.isPending && decommissionMutation.variables === record.id}
+                    onClick={() => confirmDecommission(record)}
+                  >
+                    Decommission
+                  </Button>
+                )}
+              </Space>
             ),
           },
         ]}

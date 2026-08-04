@@ -21,6 +21,9 @@ const (
 	StepTypeComposeHealthCheck = "compose_healthcheck"
 	StepTypeGatewayRouteSync   = "gateway_route_sync"
 	StepTypeAPIRequest         = "http_request"
+	// Teardown pipeline (instance decommission).
+	StepTypeGatewayDrain = "gateway_drain"
+	StepTypeComposeDown  = "compose_down"
 )
 
 // PipelineStep is one node in a deploy pipeline. Relation to DeployLog is by
