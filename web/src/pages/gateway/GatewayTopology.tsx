@@ -219,13 +219,17 @@ function NodeShell({
 
 function InstanceRow({ inst }: { inst: GwInstance }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: inst.enabled ? 1 : 0.5 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: inst.enabled && !inst.stopped ? 1 : 0.5 }}>
       <span style={{ width: 7, height: 7, borderRadius: 999, flex: 'none', background: healthColor(inst.health) }} />
       <span className="agenda-mono" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {inst.name}
       </span>
       {inst.weight != null ? <span style={{ color: color.ink500, fontSize: 11 }}>w{inst.weight}</span> : null}
-      {!inst.enabled ? <span style={{ color: color.ink500, fontSize: 11 }}>off</span> : null}
+      {inst.stopped ? (
+        <span style={{ color: color.ink500, fontSize: 11 }}>stopped</span>
+      ) : !inst.enabled ? (
+        <span style={{ color: color.ink500, fontSize: 11 }}>off</span>
+      ) : null}
     </div>
   )
 }

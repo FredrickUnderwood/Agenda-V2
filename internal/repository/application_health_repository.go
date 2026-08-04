@@ -94,3 +94,18 @@ func (r *ApplicationInstanceHealthRepository) DeleteByApplication(ctx context.Co
 	}
 	return nil
 }
+
+// DeleteByTargetID drops one instance's health record. Used when an instance is
+// decommissioned: the health monitor stops probing a stopped instance, so a
+// lingering record would freeze at its last (typically healthy) status and keep
+// the UI showing the instance as green forever. Clearing it makes the instance
+// read as unmonitored/unknown until a later deploy re-establishes health.
+func (r *ApplicationInstanceHealthRepository) DeleteByTargetID(ctx context.Context, targetID int64) error {
+	if err := r.db.WithContext(ctx).
+		Where("target_id = ?", targetID).
+		Delete(&domain.ApplicationInstanceHealth{}).Error; err != nil {
+		logger.L().Error("failed to delete instance health by target", zap.Int64("target_id", targetID), zap.Error(err))
+		return err
+	}
+	return nil
+}

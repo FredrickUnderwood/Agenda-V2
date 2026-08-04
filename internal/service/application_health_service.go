@@ -50,6 +50,15 @@ func (s *ApplicationHealthService) GetTargetHealthForApplication(ctx context.Con
 	return s.health.GetByTargetID(ctx, targetID)
 }
 
+// ClearTargetHealth drops an instance's health record. Called when an instance
+// is decommissioned: the monitor no longer probes a stopped instance, so its
+// last health row would otherwise freeze at "healthy" and keep every health
+// readout (instance list, gateway route map) showing it green. After clearing,
+// the instance reads as unmonitored until a later deploy re-establishes health.
+func (s *ApplicationHealthService) ClearTargetHealth(ctx context.Context, targetID int64) error {
+	return s.health.DeleteByTargetID(ctx, targetID)
+}
+
 func (s *ApplicationHealthService) CheckTargetForApplication(ctx context.Context, appID, targetID int64) (*domain.ApplicationInstanceHealth, error) {
 	target, err := s.targets.GetByID(ctx, targetID)
 	if err != nil {

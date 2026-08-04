@@ -158,7 +158,7 @@ export function InstancesTab({ appId }: { appId: number }) {
             key: 'desired_state',
             render: (_, record) =>
               record.desired_state === 'stopped' ? (
-                <StatusPill status="failed" label="stopped" />
+                <StatusPill status="idle" label="stopped" />
               ) : (
                 <StatusPill status="verified" label="running" />
               ),
@@ -167,7 +167,16 @@ export function InstancesTab({ appId }: { appId: number }) {
             title: 'Health',
             key: 'health',
             render: (_, record) =>
-              record.health ? <StatusPill status={record.health.status} /> : <StatusPill status="unknown" label="unchecked" />,
+              // A stopped instance isn't probed, so its health is meaningless —
+              // show it as stopped rather than a stale green or a misleading
+              // "unchecked" that reads like a config gap.
+              record.desired_state === 'stopped' ? (
+                <StatusPill status="idle" label="stopped" />
+              ) : record.health ? (
+                <StatusPill status={record.health.status} />
+              ) : (
+                <StatusPill status="unknown" label="unchecked" />
+              ),
           },
           {
             title: 'Logs',

@@ -28,6 +28,13 @@ import (
 // It is deliberately separate from ReleaseApplication: a decommission has no
 // ApplicationRelease and no release state machine to advance. The DeployLog it
 // creates carries ReleaseID=0.
+// healthClearer drops an instance's stale health record on decommission, so a
+// stopped instance stops reading green in every health view. Narrow interface,
+// optional/nil-safe (satisfied by *service.ApplicationHealthService).
+type healthClearer interface {
+	ClearTargetHealth(ctx context.Context, targetID int64) error
+}
+
 type InstanceLifecycleApplication struct {
 	cfg        *config.Config
 	builder    *pipeline.Builder
@@ -37,6 +44,8 @@ type InstanceLifecycleApplication struct {
 	appSvc     *service.ApplicationService
 	releaseSvc *service.ApplicationReleaseService
 	lockSvc    *service.DeployLockService
+	// health clears an instance's stale health row on decommission. Optional/nil-safe.
+	health healthClearer
 	// alerts fires an ops notification (+ inbox) when a teardown run fails.
 	// Optional/nil-safe.
 	alerts *service.AlertService
@@ -51,12 +60,13 @@ func NewInstanceLifecycleApplication(
 	appSvc *service.ApplicationService,
 	releaseSvc *service.ApplicationReleaseService,
 	lockSvc *service.DeployLockService,
+	health healthClearer,
 	alerts *service.AlertService,
 ) *InstanceLifecycleApplication {
 	return &InstanceLifecycleApplication{
 		cfg: cfg, builder: builder, runner: runner,
 		logSvc: logSvc, stepSvc: stepSvc, appSvc: appSvc,
-		releaseSvc: releaseSvc, lockSvc: lockSvc, alerts: alerts,
+		releaseSvc: releaseSvc, lockSvc: lockSvc, health: health, alerts: alerts,
 	}
 }
 
@@ -98,6 +108,17 @@ func (a *InstanceLifecycleApplication) Decommission(ctx context.Context, appID, 
 	if err := a.appSvc.SetInstanceDesiredState(ctx, targetID, domain.RuntimeStateStopped); err != nil {
 		a.lockSvc.ReleaseKey(ctx, lockKey, token)
 		return nil, err
+	}
+
+	// Drop the stale health row so the instance stops reading green everywhere
+	// (instance list + gateway route map both render off this record, and the
+	// monitor won't touch a stopped instance again to correct it). Best-effort:
+	// a failure here must not block the teardown — the intent is already durable.
+	if a.health != nil {
+		if err := a.health.ClearTargetHealth(ctx, targetID); err != nil {
+			logger.L().Warn("lifecycle: failed to clear instance health on decommission",
+				zap.Int64("target_id", targetID), zap.Error(err))
+		}
 	}
 
 	blueprints, localPath, err := a.builder.BuildTeardown(ctx, dt)

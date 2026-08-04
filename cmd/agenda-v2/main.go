@@ -112,7 +112,7 @@ func main() {
 
 	// Application
 	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, envDeploymentSvc, alertSvc)
-	instanceLifecycleApp := application.NewInstanceLifecycleApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, alertSvc)
+	instanceLifecycleApp := application.NewInstanceLifecycleApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, appHealthSvc, alertSvc)
 
 	healthMonitor := application.NewHealthMonitor(appHealthSvc, 15*time.Second)
 	healthMonitor.Start()
