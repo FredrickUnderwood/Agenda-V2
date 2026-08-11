@@ -70,6 +70,16 @@ func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAd
 	type svc struct {
 		Volumes     []string `yaml:"volumes"`
 		Environment []string `yaml:"environment"`
+		Labels      []string `yaml:"labels"`
+	}
+
+	// Labels mirror the AGENDA_ env identity but in docker-filterable form, so
+	// teardown can pick out exactly this instance's containers by
+	// (app, env, instance) regardless of branch. See contract.Label* .
+	labels := []string{
+		contract.LabelApp + "=" + appName,
+		contract.LabelEnv + "=" + envName,
+		contract.LabelInstance + "=" + instanceName,
 	}
 
 	userKeys := make([]string, 0, len(userEnv))
@@ -107,6 +117,7 @@ func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAd
 				m[name] = svc{
 					Volumes:     []string{logDir + ":" + contract.AgendaContainerLogDir},
 					Environment: buildEnv(name),
+					Labels:      labels,
 				}
 			}
 			return m

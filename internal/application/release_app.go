@@ -96,13 +96,9 @@ func (a *ReleaseApplication) DeployEnv(ctx context.Context, appID int64, env dom
 	}
 	enabled := make([]*domain.ApplicationEnvTarget, 0, len(targets))
 	for _, t := range targets {
-		if !t.Enabled {
-			continue
+		if eligibleForEnvDeploy(t, wantInstance) {
+			enabled = append(enabled, t)
 		}
-		if wantInstance != "" && t.InstanceName != wantInstance {
-			continue
-		}
-		enabled = append(enabled, t)
 	}
 	if len(enabled) == 0 {
 		if wantInstance != "" {
@@ -440,6 +436,16 @@ func (a *ReleaseApplication) syncReleaseStatus(ctx context.Context, releaseID in
 		if err := a.releaseSvc.MarkDeploySucceeded(ctx, releaseID, log.TriggerSHA); err != nil {
 			return
 		}
+		// A successful deploy is the sole "bring back online" path: if this
+		// instance was decommissioned (DesiredState=stopped), the running
+		// containers now contradict that intent, so flip it back to running.
+		// This is why there is no separate recommission action — deploying a
+		// stopped instance restarts it and clears the stopped state in one step.
+		// Best-effort: the release already succeeded; a failure here only leaves
+		// a stale flag the next deploy will correct (repo layer logs it).
+		if target != nil && target.EnvTarget != nil && target.EnvTarget.Stopped() {
+			_ = a.appSvc.SetInstanceDesiredState(ctx, target.EnvTarget.ID, domain.RuntimeStateRunning)
+		}
 		rel, err := a.releaseSvc.Get(ctx, releaseID)
 		if err != nil {
 			return
@@ -511,4 +517,22 @@ func (a *ReleaseApplication) lockTTL() time.Duration {
 		ttl = 5 * time.Minute
 	}
 	return ttl + 30*time.Second
+}
+
+// eligibleForEnvDeploy decides whether a target is included in a DeployEnv
+// fan-out. wantInstance is the already-normalized instance filter ("" = whole
+// env). A disabled target is never deployed. When an instance is named, the
+// fan-out targets exactly it — even if stopped, because an explicit deploy is
+// how a decommissioned instance is restarted. When no instance is named, stopped
+// (decommissioned) instances are skipped so a whole-env deploy never silently
+// resurrects one an operator stopped — decommission is sticky, mirroring how a
+// disabled instance is skipped.
+func eligibleForEnvDeploy(t *domain.ApplicationEnvTarget, wantInstance string) bool {
+	if !t.Enabled {
+		return false
+	}
+	if wantInstance != "" {
+		return t.InstanceName == wantInstance
+	}
+	return !t.Stopped()
 }

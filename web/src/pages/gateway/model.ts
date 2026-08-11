@@ -17,6 +17,7 @@ export interface GwInstance {
   targetId: number
   name: string
   enabled: boolean
+  stopped: boolean // decommissioned (desired_state=stopped): drained + no containers
   health: string
   machineId: number
   port: number
@@ -63,11 +64,16 @@ export interface AppInstances {
 }
 
 function toInstance(t: ApplicationEnvTarget): GwInstance {
+  const stopped = t.desired_state === 'stopped'
   return {
     targetId: t.id,
     name: t.display_name || t.instance_name,
     enabled: t.enabled,
-    health: t.health?.status ?? 'unknown',
+    stopped,
+    // A decommissioned instance has no live containers and the monitor no longer
+    // probes it, so its stored health is stale — surface it as 'stopped' rather
+    // than whatever green/red it froze at.
+    health: stopped ? 'stopped' : t.health?.status ?? 'unknown',
     machineId: t.machine_id,
     port: t.port,
   }
@@ -75,17 +81,20 @@ function toInstance(t: ApplicationEnvTarget): GwInstance {
 
 // Which backend instances a route resolves to. 'selected' pins specific targets
 // (with weights); 'all_enabled'/'single' fan out to the env's enabled instances.
+// A stopped (decommissioned) instance has been drained from the gateway, so it is
+// never a live backend regardless of mode — excluded here so the route map
+// matches what the gateway actually serves.
 function resolveRouteInstances(r: ApplicationGatewayRoute, envInstances: GwInstance[]): GwInstance[] {
   if (r.backend_mode === 'selected') {
     const byId = new Map(envInstances.map((i) => [i.targetId, i]))
     const out: GwInstance[] = []
     for (const b of r.backends ?? []) {
       const inst = byId.get(b.target_id)
-      if (inst) out.push({ ...inst, weight: b.weight })
+      if (inst && !inst.stopped) out.push({ ...inst, weight: b.weight })
     }
     return out
   }
-  return envInstances.filter((i) => i.enabled)
+  return envInstances.filter((i) => i.enabled && !i.stopped)
 }
 
 // '*' (any host) sorts last; envs sort in a stable, meaningful order.
@@ -167,6 +176,7 @@ export function healthTone(status: string): 'verified' | 'failed' | 'building' |
     case 'unhealthy':
     case 'failed':
       return 'failed'
+    case 'stopped':
     case 'unknown':
     case '':
       return 'idle'

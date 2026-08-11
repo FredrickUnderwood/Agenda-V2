@@ -33,6 +33,14 @@ type proxyResyncer interface {
 	ResyncMachine(ctx context.Context, machineID int64) (int, error)
 }
 
+// instanceReconciler finishes container teardowns a machine was offline for: an
+// instance decommissioned while its machine was down keeps DesiredState=stopped
+// but still has running containers, so on recovery the teardown is re-attempted.
+// Narrow interface, optional — nil disables the behavior.
+type instanceReconciler interface {
+	ReconcileStopped(ctx context.Context, machineID int64) (int, error)
+}
+
 // MachineMonitor is a ticking background worker that watches agent-mode
 // machines' heartbeat-derived online status and fires an alert (via
 // AlertService.SendToAll, reusing the Feishu/DingTalk/WeCom/Slack/custom
@@ -43,13 +51,14 @@ type proxyResyncer interface {
 // heartbeat and always report offline (domain.Machine.Online), so alerting on
 // them would be a permanent false positive.
 type MachineMonitor struct {
-	machines machineLister
-	alerts   *service.AlertService
-	resync   proxyResyncer
-	interval time.Duration
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	machines          machineLister
+	alerts            *service.AlertService
+	resync            proxyResyncer
+	instanceReconcile instanceReconciler
+	interval          time.Duration
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
 
 	// lastOnline remembers each agent machine's previously observed status so
 	// only edges (not every tick) alert. Touched solely by the single monitor
@@ -57,21 +66,23 @@ type MachineMonitor struct {
 	lastOnline map[int64]bool
 }
 
-// NewMachineMonitor builds the monitor. resync may be nil, in which case a
-// recovered node's proxy routes are not automatically re-registered.
-func NewMachineMonitor(machines machineLister, alerts *service.AlertService, resync proxyResyncer, interval time.Duration) *MachineMonitor {
+// NewMachineMonitor builds the monitor. resync and reconcile may each be nil, in
+// which case the corresponding recovery behavior (proxy re-registration /
+// stopped-instance teardown) is disabled.
+func NewMachineMonitor(machines machineLister, alerts *service.AlertService, resync proxyResyncer, reconcile instanceReconciler, interval time.Duration) *MachineMonitor {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &MachineMonitor{
-		machines:   machines,
-		alerts:     alerts,
-		resync:     resync,
-		interval:   interval,
-		ctx:        ctx,
-		cancel:     cancel,
-		lastOnline: make(map[int64]bool),
+		machines:          machines,
+		alerts:            alerts,
+		resync:            resync,
+		instanceReconcile: reconcile,
+		interval:          interval,
+		ctx:               ctx,
+		cancel:            cancel,
+		lastOnline:        make(map[int64]bool),
 	}
 }
 
@@ -138,7 +149,12 @@ func (m *MachineMonitor) evaluateOnce() {
 		if !known {
 			// First observation (fresh process or newly-added machine): seed
 			// state without alerting, so a restart doesn't re-blast every
-			// already-offline machine.
+			// already-offline machine. Still reconcile stopped instances when the
+			// machine is already up — a decommission may have failed to reach it
+			// before this control-plane process started.
+			if online {
+				m.reconcileStopped(ctx, v.ID)
+			}
 			continue
 		}
 		switch {
@@ -146,6 +162,11 @@ func (m *MachineMonitor) evaluateOnce() {
 			m.alert(ctx, v, false)
 		case !prev && online:
 			m.alert(ctx, v, true)
+			// Recovery edge: finish any container teardown the machine was offline
+			// for. Unlike proxy resync (every tick, volatile registry), a teardown
+			// stays done once it succeeds, so triggering only on recovery avoids a
+			// pointless node round-trip every tick for already-torn-down instances.
+			m.reconcileStopped(ctx, v.ID)
 		}
 	}
 
@@ -169,6 +190,20 @@ func (m *MachineMonitor) resyncProxies(ctx context.Context, machineID int64) {
 	}
 	if _, err := m.resync.ResyncMachine(ctx, machineID); err != nil {
 		logger.L().Warn("machine monitor: proxy resync after recovery failed",
+			zap.Int64("machine_id", machineID), zap.Error(err))
+	}
+}
+
+// reconcileStopped re-attempts the container teardown for instances
+// decommissioned while this machine was offline. Called only on a recovery
+// transition (or first observation of an online machine), not every tick.
+// Best-effort — a failure is logged; the next recovery edge retries.
+func (m *MachineMonitor) reconcileStopped(ctx context.Context, machineID int64) {
+	if m.instanceReconcile == nil {
+		return
+	}
+	if _, err := m.instanceReconcile.ReconcileStopped(ctx, machineID); err != nil {
+		logger.L().Warn("machine monitor: stopped-instance reconcile after recovery failed",
 			zap.Int64("machine_id", machineID), zap.Error(err))
 	}
 }

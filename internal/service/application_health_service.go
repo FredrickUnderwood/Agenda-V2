@@ -50,6 +50,15 @@ func (s *ApplicationHealthService) GetTargetHealthForApplication(ctx context.Con
 	return s.health.GetByTargetID(ctx, targetID)
 }
 
+// ClearTargetHealth drops an instance's health record. Called when an instance
+// is decommissioned: the monitor no longer probes a stopped instance, so its
+// last health row would otherwise freeze at "healthy" and keep every health
+// readout (instance list, gateway route map) showing it green. After clearing,
+// the instance reads as unmonitored until a later deploy re-establishes health.
+func (s *ApplicationHealthService) ClearTargetHealth(ctx context.Context, targetID int64) error {
+	return s.health.DeleteByTargetID(ctx, targetID)
+}
+
 func (s *ApplicationHealthService) CheckTargetForApplication(ctx context.Context, appID, targetID int64) (*domain.ApplicationInstanceHealth, error) {
 	target, err := s.targets.GetByID(ctx, targetID)
 	if err != nil {
@@ -68,6 +77,13 @@ func (s *ApplicationHealthService) CheckTarget(ctx context.Context, target *doma
 	normalizeHealthCheckConfig(target)
 	if !target.Enabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", target.Env, target.InstanceName))
+	}
+	// A decommissioned instance has no containers to probe; checking it would
+	// flap to unhealthy and fire a spurious alert during/after teardown. The
+	// monitor still lists it (enabled + health_check_enabled remain set), so the
+	// guard lives here rather than in the SQL filter.
+	if target.Stopped() {
+		return nil, errors.New(fmt.Sprintf("%s/%s instance is stopped", target.Env, target.InstanceName))
 	}
 	if !target.HealthCheckEnabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s health check is disabled", target.Env, target.InstanceName))

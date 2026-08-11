@@ -112,6 +112,7 @@ func main() {
 
 	// Application
 	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, envDeploymentSvc, alertSvc)
+	instanceLifecycleApp := application.NewInstanceLifecycleApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, appHealthSvc, alertSvc)
 
 	healthMonitor := application.NewHealthMonitor(appHealthSvc, 15*time.Second)
 	healthMonitor.Start()
@@ -122,7 +123,8 @@ func main() {
 	defer alertRuleMonitor.Stop()
 
 	proxyResyncSvc := service.NewProxyResyncService(appTargetRepo, appReleaseRepo, machineSvc, appRepo)
-	machineMonitor := application.NewMachineMonitor(machineSvc, alertSvc, proxyResyncSvc, 30*time.Second)
+	instanceReconcile := application.NewInstanceReconcile(appTargetRepo, builder, appRepo, appReleaseRepo)
+	machineMonitor := application.NewMachineMonitor(machineSvc, alertSvc, proxyResyncSvc, instanceReconcile, 30*time.Second)
 	machineMonitor.Start()
 	defer machineMonitor.Stop()
 
@@ -137,7 +139,7 @@ func main() {
 	}
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

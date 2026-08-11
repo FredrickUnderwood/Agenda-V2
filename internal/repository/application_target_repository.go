@@ -124,6 +124,22 @@ func (r *ApplicationTargetRepository) ListEnabledByMachine(ctx context.Context, 
 	return targets, nil
 }
 
+// ListStoppedByMachine returns the decommissioned instances (DesiredState=
+// stopped) on one machine, regardless of Enabled. The reconcile path uses it to
+// re-attempt a container teardown that couldn't reach the machine when the
+// decommission was first requested.
+func (r *ApplicationTargetRepository) ListStoppedByMachine(ctx context.Context, machineID int64) ([]*domain.ApplicationEnvTarget, error) {
+	var targets []*domain.ApplicationEnvTarget
+	if err := r.db.WithContext(ctx).
+		Where("machine_id = ? AND desired_state = ?", machineID, domain.RuntimeStateStopped).
+		Find(&targets).Error; err != nil {
+		logger.L().Error("failed to list stopped targets by machine",
+			zap.Int64("machine_id", machineID), zap.Error(err))
+		return nil, err
+	}
+	return targets, nil
+}
+
 func (r *ApplicationTargetRepository) Upsert(ctx context.Context, target *domain.ApplicationEnvTarget) error {
 	var existing domain.ApplicationEnvTarget
 	target.InstanceName = domain.NormalizeInstanceName(target.InstanceName)
@@ -171,6 +187,22 @@ func (r *ApplicationTargetRepository) Upsert(ctx context.Context, target *domain
 			zap.String("env", string(target.Env)),
 			zap.String("instance_name", target.InstanceName),
 			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// UpdateDesiredState writes only the desired_state column for one target. It is
+// intentionally a focused single-column update rather than going through Upsert:
+// Upsert's field list omits desired_state (config edits must not resurrect a
+// decommissioned instance), so the lifecycle path owns this column exclusively.
+func (r *ApplicationTargetRepository) UpdateDesiredState(ctx context.Context, id int64, state domain.RuntimeState) error {
+	if err := r.db.WithContext(ctx).
+		Model(&domain.ApplicationEnvTarget{}).
+		Where("id = ?", id).
+		Update("desired_state", state).Error; err != nil {
+		logger.L().Error("failed to update target desired_state",
+			zap.Int64("id", id), zap.String("state", string(state)), zap.Error(err))
 		return err
 	}
 	return nil
