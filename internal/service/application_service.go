@@ -256,6 +256,72 @@ func (s *ApplicationService) SetInstanceDesiredState(ctx context.Context, target
 	return s.targets.UpdateDesiredState(ctx, targetID, state)
 }
 
+// DeleteInstance removes one instance record and everything keyed to it.
+//
+// Callers are responsible for the lifecycle guard (only a decommissioned
+// instance may be deleted) — see application.InstanceLifecycleApplication.
+// This method owns only the data cleanup, in an order chosen so a failure
+// part-way through never leaves a dangling reference:
+//
+//  1. gateway route pins (application_gateway_route_backend rows naming this
+//     target), because a leftover pin breaks every later save of the app;
+//  2. the health row, so the instance stops appearing in health views;
+//  3. the target itself.
+//
+// Deliberately NOT deleted: deploy logs and releases that reference the
+// instance. They are the audit trail of what actually happened on this
+// application, and losing the history of an instance is a much worse outcome
+// than a few log rows naming an id that no longer resolves.
+//
+// Gateway routes themselves are env-scoped, not instance-scoped, so deleting
+// one instance normally leaves them alone. The exception is deleting an env's
+// LAST instance: the routes would then have nothing to resolve backends from
+// and no way to ever be deployed again, so they are disabled — the same thing
+// syncTargets does when an env disappears from a save. (Disabled, not deleted:
+// the row keeps the operator's host/path config, so redeploying an instance
+// into that env can re-enable it rather than starting from a blank form.)
+func (s *ApplicationService) DeleteInstance(ctx context.Context, appID, targetID int64) error {
+	target, err := s.GetTargetByID(ctx, appID, targetID)
+	if err != nil {
+		return err
+	}
+	if err := s.routeBackends.DeleteByTargetID(ctx, targetID); err != nil {
+		return err
+	}
+	if err := s.health.DeleteByTargetID(ctx, targetID); err != nil {
+		return err
+	}
+
+	siblings, err := s.targets.ListByApplication(ctx, appID)
+	if err != nil {
+		return err
+	}
+	lastInEnv := true
+	for _, other := range siblings {
+		if other.ID != targetID && other.Env == target.Env {
+			lastInEnv = false
+			break
+		}
+	}
+
+	if err := s.targets.DeleteByApplicationEnvInstance(ctx, appID, target.Env, target.InstanceName); err != nil {
+		return err
+	}
+	if lastInEnv {
+		if err := s.routes.SyncByApplicationEnv(ctx, appID, target.Env, nil); err != nil {
+			return err
+		}
+	}
+	logger.L().Info("application instance deleted",
+		zap.Int64("application_id", appID),
+		zap.Int64("target_id", targetID),
+		zap.String("env", string(target.Env)),
+		zap.String("instance_name", target.InstanceName),
+		zap.Bool("last_in_env", lastInEnv),
+	)
+	return nil
+}
+
 func (s *ApplicationService) ListTargetsByApplication(ctx context.Context, appID int64, env domain.Environment) ([]*domain.ApplicationEnvTarget, error) {
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {

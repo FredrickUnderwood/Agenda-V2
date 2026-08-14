@@ -31,6 +31,23 @@ func (r *ApplicationGatewayRouteBackendRepository) ListByRouteIDs(ctx context.Co
 	return rows, nil
 }
 
+// DeleteByTargetID removes every route pin that points at one instance.
+//
+// Needed when an instance record is deleted: a backend_mode=selected route
+// stores target_ids, and a row left pointing at a deleted instance makes the
+// next application save fail validation ("backend target N is not a <env>
+// instance of this application") — an error the operator has no way to act on,
+// since the instance it names no longer exists anywhere in the UI.
+func (r *ApplicationGatewayRouteBackendRepository) DeleteByTargetID(ctx context.Context, targetID int64) error {
+	if err := r.db.WithContext(ctx).
+		Where("target_id = ?", targetID).
+		Delete(&domain.ApplicationGatewayRouteBackend{}).Error; err != nil {
+		logger.L().Error("failed to delete gateway route backends by target", zap.Int64("target_id", targetID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
 // SyncByRoute replaces the full backend list for a route (delete + insert).
 func (r *ApplicationGatewayRouteBackendRepository) SyncByRoute(ctx context.Context, routeID int64, rows []*domain.ApplicationGatewayRouteBackend) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
