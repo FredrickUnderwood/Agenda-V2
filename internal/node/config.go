@@ -41,6 +41,12 @@ type Config struct {
 	HeartbeatInterval Duration `yaml:"heartbeat_interval"`
 	MaxOutputBytes    int      `yaml:"max_output_bytes"`
 	JobRetention      Duration `yaml:"job_retention"`
+
+	// ProxyDrainTimeout is how long shutdown waits for relayed WebSocket
+	// tunnels to end before force-closing them. Hijacked connections are
+	// invisible to http.Server.Shutdown, so without an explicit wait a node
+	// restart severs every tunnel through it instantly.
+	ProxyDrainTimeout Duration `yaml:"proxy_drain_timeout"`
 }
 
 // Duration is a yaml-unmarshalable time.Duration ("15s", "1h").
@@ -63,6 +69,7 @@ func defaults() *Config {
 		HeartbeatInterval: Duration{15 * time.Second},
 		MaxOutputBytes:    65536,
 		JobRetention:      Duration{time.Hour},
+		ProxyDrainTimeout: Duration{30 * time.Second},
 	}
 }
 

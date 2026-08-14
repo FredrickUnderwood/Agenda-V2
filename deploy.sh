@@ -131,6 +131,10 @@ gateway:
   timeout: "10s"
   backend_scheme: "http"
   backend_host: "host.docker.internal"
+  # How long an instance decommission waits, after the gateway stops sending it
+  # new traffic, for its already-established WebSocket connections to close
+  # before the containers are removed. 0 disables the wait.
+  ws_drain_timeout: "30s"
 
 log:
   level: "info"
@@ -173,6 +177,9 @@ central_base_url: "http://control-plane:8080"
 heartbeat_interval: "15s"
 max_output_bytes: 65536
 job_retention: "1h"
+# How long a node restart waits for relayed WebSocket tunnels to close before
+# force-closing them (hijacked connections are invisible to graceful shutdown).
+proxy_drain_timeout: "30s"
 EOF
 }
 

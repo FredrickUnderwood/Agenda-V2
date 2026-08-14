@@ -23,7 +23,13 @@ const (
 	StepTypeAPIRequest         = "http_request"
 	// Teardown pipeline (instance decommission).
 	StepTypeGatewayDrain = "gateway_drain"
-	StepTypeComposeDown  = "compose_down"
+	// StepTypeGatewayWSDrain waits, after the route drain, for the instance's
+	// established WebSocket tunnels to close. Removing a route stops NEW
+	// connections; the ones already open stay bound to the instance that
+	// accepted them, so this is the only thing between a decommission and
+	// yanking the socket out from under every live client.
+	StepTypeGatewayWSDrain = "gateway_ws_drain"
+	StepTypeComposeDown    = "compose_down"
 )
 
 // PipelineStep is one node in a deploy pipeline. Relation to DeployLog is by

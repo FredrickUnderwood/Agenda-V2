@@ -48,6 +48,9 @@ frontend + backend apps** on machines *you* control.
   weighted, health-gated backends, per-endpoint metrics (QPS / error rate /
   latency percentiles), and **embedded edge TLS** via ACME DNS-01 (no separate
   Caddy/nginx). See [doc/gateway-edge-tls.md](doc/gateway-edge-tls.md).
+  **WebSocket** is supported per route (opt-in), with idle timeouts, connection
+  caps, an Origin allowlist, dedicated metrics, and connection draining on
+  restart and decommission. See [doc/gateway-websocket.md](doc/gateway-websocket.md).
 - **Observability** — per-instance log tailing, Prometheus metrics, and Grafana
   dashboards reverse-proxied under the web console. Apps expose custom metrics
   through the SDK; the control plane scrapes them via the node relay (no direct

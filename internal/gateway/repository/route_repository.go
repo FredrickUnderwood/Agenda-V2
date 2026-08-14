@@ -96,6 +96,14 @@ func (r *RouteRepository) UpsertRoute(
 				"instance_select_mode": route.InstanceSelectMode,
 				"instance_header":      route.InstanceHeader,
 				"timeout_ms":           route.TimeoutMs,
+				// Written through an explicit map (not Updates(&struct)) so a
+				// zero value — upgrade_mode back to "none", a cleared origin
+				// allowlist, max_connections back to unlimited — is persisted
+				// instead of being skipped as "unset".
+				"upgrade_mode":              route.UpgradeMode,
+				"websocket_idle_timeout_ms": route.WebsocketIdleTimeoutMs,
+				"websocket_max_connections": route.WebsocketMaxConnections,
+				"websocket_allowed_origins": route.WebsocketAllowedOrigins,
 			}).Error; err != nil {
 				alog.L().Error("update route failed", zap.String("route_key", route.RouteKey), zap.Error(err))
 				return err

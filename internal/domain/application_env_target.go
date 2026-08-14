@@ -125,6 +125,16 @@ const (
 
 const DefaultGatewayInstanceHeader = "X-Agenda-Instance"
 
+// GatewayUpgradeMode mirrors the gateway's own upgrade gate (see
+// internal/gateway/domain.UpgradeMode). A route must opt in explicitly before
+// the gateway will turn any of its requests into a WebSocket tunnel.
+type GatewayUpgradeMode string
+
+const (
+	GatewayUpgradeModeNone      GatewayUpgradeMode = "none"
+	GatewayUpgradeModeWebSocket GatewayUpgradeMode = "websocket"
+)
+
 // ApplicationGatewayRoute is one externally reachable route (host+path)
 // pointing at one or more ApplicationEnvTarget backends. An instance can
 // expose several routes (e.g. a C-end host and an admin-end host).
@@ -141,9 +151,27 @@ type ApplicationGatewayRoute struct {
 	BackendMode        GatewayBackendMode        `json:"backend_mode"         gorm:"size:16;not null;default:single"`
 	InstanceSelectMode GatewayInstanceSelectMode `json:"instance_select_mode" gorm:"size:16;not null;default:disabled"`
 	InstanceHeader     string                    `json:"instance_header"      gorm:"size:64;not null;default:'X-Agenda-Instance'"`
-	SortOrder          int                       `json:"sort_order"     gorm:"not null;default:0"`
-	CreatedAt          time.Time                 `json:"created_at"`
-	UpdatedAt          time.Time                 `json:"updated_at"`
+	// UpgradeMode and the Websocket* fields are pushed through to the gateway
+	// route on every deploy (see pipeline.GatewayRouteSpec). They live here,
+	// not only in the gateway's own table, because the gateway's route rows are
+	// derived state — a redeploy rewrites them from this record, so anything
+	// configured only on the gateway side would be lost at the next release.
+	UpgradeMode GatewayUpgradeMode `json:"upgrade_mode" gorm:"size:16;not null;default:none"`
+	// RequestTimeoutMs is the ordinary HTTP total timeout for this route
+	// (0 = the gateway's own default). It applies to plain requests only;
+	// an upgraded connection is bounded by WebsocketIdleTimeoutMs instead.
+	RequestTimeoutMs int `json:"request_timeout_ms" gorm:"not null;default:0"`
+	// WebsocketIdleTimeoutMs: 0 = gateway default, negative = no idle timeout.
+	WebsocketIdleTimeoutMs int `json:"websocket_idle_timeout_ms" gorm:"not null;default:0"`
+	// WebsocketMaxConnections caps concurrent tunnels on this route (0 = only
+	// the gateway-wide cap applies).
+	WebsocketMaxConnections int `json:"websocket_max_connections" gorm:"not null;default:0"`
+	// WebsocketAllowedOrigins is a comma-separated browser Origin allowlist;
+	// empty allows any origin.
+	WebsocketAllowedOrigins string    `json:"websocket_allowed_origins" gorm:"size:1024;not null;default:''"`
+	SortOrder               int       `json:"sort_order"     gorm:"not null;default:0"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 
 	Backends []*ApplicationGatewayRouteBackend `json:"backends,omitempty" gorm:"-"`
 }

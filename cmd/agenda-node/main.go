@@ -46,7 +46,11 @@ func main() {
 	mgmtSrv := &http.Server{Addr: cfg.ListenAddr, Handler: mgmt.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	// Data-plane reverse proxy (gateway backends point here), no auth.
-	proxySrv := &http.Server{Addr: cfg.ProxyListenAddr, Handler: node.NewProxyHandler(registry, cfg.ProxyBackendHost)}
+	// Deliberately without Read/Write timeouts: this port carries relayed
+	// WebSocket tunnels, and a write deadline would cut a healthy long-lived
+	// connection at a fixed age.
+	proxyHandler := node.NewProxyHandler(registry, cfg.ProxyBackendHost)
+	proxySrv := &http.Server{Addr: cfg.ProxyListenAddr, Handler: proxyHandler}
 
 	// Heartbeat to the control plane.
 	node.NewHeartbeat(cfg.CentralBaseURL, cfg.MachineID, cfg.Token, cfg.HeartbeatInterval.Duration).Start(ctx)
@@ -70,8 +74,27 @@ func main() {
 		log.L().Info("shutting down")
 	}
 
+	// Stop admitting new tunnels before the listeners close, so clients that
+	// reconnect during the drain are steered to another instance instead of
+	// landing back on a node that is going away.
+	proxyHandler.BeginDrain()
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = mgmtSrv.Shutdown(shutdownCtx)
 	_ = proxySrv.Shutdown(shutdownCtx)
+
+	// Shutdown ignores hijacked connections, so relayed tunnels are drained
+	// separately, on their own budget.
+	if active := proxyHandler.ActiveTunnels(); active > 0 {
+		log.L().Info("draining relayed websocket tunnels",
+			zap.Int("active", active),
+			zap.Duration("timeout", cfg.ProxyDrainTimeout.Duration),
+		)
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), cfg.ProxyDrainTimeout.Duration)
+		if forced := proxyHandler.Drain(drainCtx); forced > 0 {
+			log.L().Warn("force-closed relayed websocket tunnels", zap.Int("count", forced))
+		}
+		cancelDrain()
+	}
 }

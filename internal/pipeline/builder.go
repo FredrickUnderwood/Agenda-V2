@@ -161,16 +161,69 @@ func (b *Builder) BuildTeardown(ctx context.Context, target *domain.DeployTarget
 		return nil, "", err
 	}
 
-	bps := make([]Blueprint, 0, 2)
+	bps := make([]Blueprint, 0, 3)
 	drain, err := b.buildGatewayDrain(ctx, target, dockerCfg, machine)
 	if err != nil {
 		return nil, "", err
 	}
 	if drain.Exec != nil {
 		bps = append(bps, drain)
+		// Only meaningful after a route drain, and only for routes that can
+		// actually hold a tunnel — so it is built from the same route set and
+		// skipped entirely when none of them allows upgrades.
+		if wsDrain := b.buildGatewayWSDrain(target); wsDrain.Exec != nil {
+			bps = append(bps, wsDrain)
+		}
 	}
 	bps = append(bps, step)
 	return bps, localPath, nil
+}
+
+// buildGatewayWSDrain builds the wait-for-tunnels step that sits between the
+// route drain and compose down. Returns an empty Blueprint when the gateway is
+// off, the wait is disabled (gateway.ws_drain_timeout = 0), or no route on this
+// instance has WebSocket enabled — in which case there is nothing that could
+// still be attached and the extra step would only slow every teardown down.
+func (b *Builder) buildGatewayWSDrain(target *domain.DeployTarget) Blueprint {
+	if !b.cfg.Gateway.Enabled || b.cfg.Gateway.WSDrainTimeout.Duration <= 0 {
+		return Blueprint{}
+	}
+	if target.EnvTarget == nil {
+		return Blueprint{}
+	}
+	routeKeys := make([]string, 0, len(target.EnvTarget.GatewayRoutes))
+	for _, route := range target.EnvTarget.GatewayRoutes {
+		if route == nil || route.RouteKey == "" {
+			continue
+		}
+		if normalizeUpgradeMode(route.UpgradeMode) != domain.GatewayUpgradeModeWebSocket {
+			continue
+		}
+		routeKeys = append(routeKeys, route.RouteKey)
+	}
+	if len(routeKeys) == 0 {
+		return Blueprint{}
+	}
+	return Blueprint{
+		Name: "gateway_ws_drain",
+		Type: domain.StepTypeGatewayWSDrain,
+		Exec: &GatewayWSDrainStep{
+			Client:       gatewayclient.NewClient(b.cfg.Gateway),
+			InstanceName: targetInstanceName(target),
+			RouteKeys:    routeKeys,
+			Timeout:      b.cfg.Gateway.WSDrainTimeout.Duration,
+		},
+	}
+}
+
+// normalizeUpgradeMode treats anything unrecognized — including the empty
+// string on rows written before the column existed — as "no upgrades", so a
+// route only carries WebSockets when someone explicitly said so.
+func normalizeUpgradeMode(mode domain.GatewayUpgradeMode) domain.GatewayUpgradeMode {
+	if mode == domain.GatewayUpgradeModeWebSocket {
+		return domain.GatewayUpgradeModeWebSocket
+	}
+	return domain.GatewayUpgradeModeNone
 }
 
 // BuildContainerTeardownStep returns just the compose_down step for an instance,
@@ -349,6 +402,15 @@ func (b *Builder) buildGatewayDrain(ctx context.Context, target *domain.DeployTa
 			InstanceSelectMode: string(instanceSelectMode),
 			InstanceHeader:     instanceHeader,
 			Backends:           backends,
+
+			// Carried through the drain too: the drain is an upsert of the same
+			// route, so dropping these would silently disable WebSocket on a
+			// route whose surviving instances are still serving tunnels.
+			UpgradeMode:             string(normalizeUpgradeMode(route.UpgradeMode)),
+			RequestTimeoutMs:        route.RequestTimeoutMs,
+			WebsocketIdleTimeoutMs:  route.WebsocketIdleTimeoutMs,
+			WebsocketMaxConnections: route.WebsocketMaxConnections,
+			WebsocketAllowedOrigins: route.WebsocketAllowedOrigins,
 		})
 	}
 	if len(specs) == 0 {
@@ -578,6 +640,12 @@ func (b *Builder) buildGatewayRouteSync(ctx context.Context, target *domain.Depl
 			InstanceSelectMode: string(instanceSelectMode),
 			InstanceHeader:     instanceHeader,
 			Backends:           backends,
+
+			UpgradeMode:             string(normalizeUpgradeMode(route.UpgradeMode)),
+			RequestTimeoutMs:        route.RequestTimeoutMs,
+			WebsocketIdleTimeoutMs:  route.WebsocketIdleTimeoutMs,
+			WebsocketMaxConnections: route.WebsocketMaxConnections,
+			WebsocketAllowedOrigins: route.WebsocketAllowedOrigins,
 		})
 	}
 	if len(specs) == 0 {

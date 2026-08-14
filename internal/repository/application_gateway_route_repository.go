@@ -122,6 +122,15 @@ func (r *ApplicationGatewayRouteRepository) SyncByApplicationEnv(ctx context.Con
 						"instance_select_mode": route.InstanceSelectMode,
 						"instance_header":      route.InstanceHeader,
 						"sort_order":           route.SortOrder,
+						// Explicit map, so clearing a value (upgrade_mode back
+						// to none, an emptied Origin allowlist, a cap back to
+						// unlimited) is written rather than skipped as a
+						// zero-value "unset".
+						"upgrade_mode":              route.UpgradeMode,
+						"request_timeout_ms":        route.RequestTimeoutMs,
+						"websocket_idle_timeout_ms": route.WebsocketIdleTimeoutMs,
+						"websocket_max_connections": route.WebsocketMaxConnections,
+						"websocket_allowed_origins": route.WebsocketAllowedOrigins,
 					}).Error; err != nil {
 					logger.L().Error("failed to update gateway route",
 						zap.Int64("id", old.ID), zap.String("route_key", route.RouteKey), zap.Error(err))

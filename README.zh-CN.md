@@ -41,6 +41,8 @@
 - **内置网关**（`agenda-gateway`）——按 host/path 动态路由，后端可加权、按健康状态门控，
   提供接口级指标（QPS / 错误率 / 延迟分位），并**内置边缘 TLS**(ACME DNS-01,无需另起
   Caddy/nginx)。见 [doc/gateway-edge-tls.md](doc/gateway-edge-tls.md)。
+  **WebSocket** 按路由开关(默认关闭),带空闲超时、连接数上限、Origin 白名单、独立指标,
+  以及重启和实例下线时的连接优雅排空。见 [doc/gateway-websocket.md](doc/gateway-websocket.md)。
 - **可观测性**——实例级日志 tail、Prometheus 指标、以及反代在控制台下的 Grafana 仪表盘。
   应用通过 SDK 暴露自定义指标；控制面经 node 中转抓取(无需直连应用端口)。
 - **告警**——自建 PromQL `AlertRule` 规则引擎，外加通过 SDK 发往

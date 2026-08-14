@@ -28,6 +28,17 @@ type UpsertRouteRequest struct {
 	Operator           string         `json:"operator"`
 	Reason             string         `json:"reason"`
 	Backends           []BackendEntry `json:"backends"`
+
+	// UpgradeMode opts a route into protocol upgrades ("websocket"); empty or
+	// "none" means Upgrade requests are rejected. The WebsocketXxx fields only
+	// apply when UpgradeMode is "websocket":
+	//   - WebsocketIdleTimeoutMs: 0 = gateway default, <0 = no idle timeout.
+	//   - WebsocketMaxConnections: 0 = unlimited (still under the gateway cap).
+	//   - WebsocketAllowedOrigins: comma-separated Origin allowlist, empty = any.
+	UpgradeMode             string `json:"upgrade_mode,omitempty"`
+	WebsocketIdleTimeoutMs  int    `json:"websocket_idle_timeout_ms,omitempty"`
+	WebsocketMaxConnections int    `json:"websocket_max_connections,omitempty"`
+	WebsocketAllowedOrigins string `json:"websocket_allowed_origins,omitempty"`
 }
 
 // BackendEntry is one backend within an upsert request. Enabled and Healthy are

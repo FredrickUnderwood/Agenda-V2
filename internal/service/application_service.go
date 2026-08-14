@@ -47,6 +47,12 @@ type ApplicationGatewayRouteRequest struct {
 	InstanceHeader     string                                  `json:"instance_header"`
 	Backends           []ApplicationGatewayRouteBackendRequest `json:"backends"`
 	SortOrder          int                                     `json:"sort_order"`
+
+	UpgradeMode             domain.GatewayUpgradeMode `json:"upgrade_mode"`
+	RequestTimeoutMs        int                       `json:"request_timeout_ms"`
+	WebsocketIdleTimeoutMs  int                       `json:"websocket_idle_timeout_ms"`
+	WebsocketMaxConnections int                       `json:"websocket_max_connections"`
+	WebsocketAllowedOrigins string                    `json:"websocket_allowed_origins"`
 }
 
 type ApplicationGatewayRouteBackendRequest struct {
@@ -561,6 +567,16 @@ func (s *ApplicationService) gatewayRoutesFromRequest(appID int64, appName strin
 		if instanceHeader == "" {
 			instanceHeader = domain.DefaultGatewayInstanceHeader
 		}
+		upgradeMode, err := normalizeGatewayUpgradeMode(routeReq.UpgradeMode)
+		if err != nil {
+			return nil, err
+		}
+		if routeReq.WebsocketMaxConnections < 0 {
+			return nil, errors.New("gateway websocket_max_connections must be >= 0")
+		}
+		if routeReq.RequestTimeoutMs < 0 {
+			return nil, errors.New("gateway request_timeout_ms must be >= 0")
+		}
 		route := &domain.ApplicationGatewayRoute{
 			ID:                 routeReq.ID,
 			ApplicationID:      appID,
@@ -575,6 +591,12 @@ func (s *ApplicationService) gatewayRoutesFromRequest(appID int64, appName strin
 			InstanceSelectMode: instanceSelectMode,
 			InstanceHeader:     instanceHeader,
 			SortOrder:          routeReq.SortOrder,
+
+			UpgradeMode:             upgradeMode,
+			RequestTimeoutMs:        routeReq.RequestTimeoutMs,
+			WebsocketIdleTimeoutMs:  routeReq.WebsocketIdleTimeoutMs,
+			WebsocketMaxConnections: routeReq.WebsocketMaxConnections,
+			WebsocketAllowedOrigins: strings.TrimSpace(routeReq.WebsocketAllowedOrigins),
 		}
 		if route.SortOrder == 0 {
 			route.SortOrder = i
@@ -624,6 +646,17 @@ func normalizeGatewayInstanceSelectMode(mode domain.GatewayInstanceSelectMode) (
 		return mode, nil
 	default:
 		return "", errors.New(fmt.Sprintf("invalid gateway instance_select_mode %q", mode))
+	}
+}
+
+func normalizeGatewayUpgradeMode(mode domain.GatewayUpgradeMode) (domain.GatewayUpgradeMode, error) {
+	switch mode {
+	case "":
+		return domain.GatewayUpgradeModeNone, nil
+	case domain.GatewayUpgradeModeNone, domain.GatewayUpgradeModeWebSocket:
+		return mode, nil
+	default:
+		return "", errors.New(fmt.Sprintf("invalid gateway upgrade_mode %q", mode))
 	}
 }
 

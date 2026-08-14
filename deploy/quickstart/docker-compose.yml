@@ -88,6 +88,16 @@ services:
       GATEWAY_TLS_ENABLED: ${GATEWAY_TLS_ENABLED:-false}
       GATEWAY_TLS_ADDR: ":443"
       GATEWAY_TLS_STORAGE_PATH: "/data"
+      # WebSocket. Whether a route may be upgraded at all is per-route config in
+      # the console (Routes tab → Protocol upgrade); these are the gateway-wide
+      # capacity limits, since one tunnel costs a connection here AND one on the
+      # node relay. 0 = no cap. See doc/gateway-websocket.md.
+      GATEWAY_WS_IDLE_TIMEOUT: ${GATEWAY_WS_IDLE_TIMEOUT:-5m}
+      GATEWAY_WS_MAX_CONNECTIONS: ${GATEWAY_WS_MAX_CONNECTIONS:-0}
+      GATEWAY_WS_MAX_CONNECTIONS_PER_IP: ${GATEWAY_WS_MAX_CONNECTIONS_PER_IP:-0}
+      GATEWAY_WS_HANDSHAKE_RATE: ${GATEWAY_WS_HANDSHAKE_RATE:-0}
+      # How long a restart waits for live tunnels before cutting them.
+      GATEWAY_WS_DRAIN_TIMEOUT: ${GATEWAY_WS_DRAIN_TIMEOUT:-30s}
     ports:
       - "${GATEWAY_PORT:-8081}:8080"
       # Only meaningful when GATEWAY_TLS_ENABLED=true; harmless (nothing listens) otherwise.

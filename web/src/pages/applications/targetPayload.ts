@@ -50,6 +50,11 @@ export function routeToRequest(r: ApplicationGatewayRoute): ApplicationGatewayRo
     instance_select_mode: r.instance_select_mode,
     instance_header: r.instance_header,
     sort_order: r.sort_order,
+    upgrade_mode: r.upgrade_mode,
+    request_timeout_ms: r.request_timeout_ms,
+    websocket_idle_timeout_ms: r.websocket_idle_timeout_ms,
+    websocket_max_connections: r.websocket_max_connections,
+    websocket_allowed_origins: r.websocket_allowed_origins,
     backends: (r.backends ?? []).map((b) => ({
       target_id: b.target_id,
       weight: b.weight,

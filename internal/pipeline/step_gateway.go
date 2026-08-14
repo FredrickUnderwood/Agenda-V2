@@ -30,6 +30,16 @@ type GatewayRouteSpec struct {
 	InstanceSelectMode string
 	InstanceHeader     string
 	Backends           []GatewayBackendSpec
+
+	// Protocol-upgrade config, forwarded verbatim to the gateway. The gateway
+	// route table is derived state — every deploy rewrites it — so these must
+	// travel with each sync or they would be reset to defaults at the next
+	// release.
+	UpgradeMode             string
+	RequestTimeoutMs        int
+	WebsocketIdleTimeoutMs  int
+	WebsocketMaxConnections int
+	WebsocketAllowedOrigins string
 }
 
 type GatewayBackendSpec struct {
@@ -100,9 +110,16 @@ func (s *GatewayRouteSyncStep) Execute(ctx context.Context, rc *RunContext) erro
 			Status:             status,
 			InstanceSelectMode: route.InstanceSelectMode,
 			InstanceHeader:     route.InstanceHeader,
-			Operator:           "agenda-v2",
-			Reason:             fmt.Sprintf("deploy log %d succeeded", rc.Log.ID),
-			Backends:           backends,
+
+			UpgradeMode:             route.UpgradeMode,
+			TimeoutMs:               route.RequestTimeoutMs,
+			WebsocketIdleTimeoutMs:  route.WebsocketIdleTimeoutMs,
+			WebsocketMaxConnections: route.WebsocketMaxConnections,
+			WebsocketAllowedOrigins: route.WebsocketAllowedOrigins,
+
+			Operator: "agenda-v2",
+			Reason:   fmt.Sprintf("deploy log %d succeeded", rc.Log.ID),
+			Backends: backends,
 		}
 		_, _ = fmt.Fprintf(rc.Output, "sync gateway route %q (%s) -> %s\n", route.RouteKey, status, strings.Join(urls, ", "))
 		if err := s.Client.UpsertRoute(ctx, route.RouteKey, req); err != nil {

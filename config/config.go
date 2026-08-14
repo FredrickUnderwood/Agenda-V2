@@ -142,6 +142,14 @@ type GatewayConfig struct {
 	Timeout       duration `yaml:"timeout"`
 	BackendScheme string   `yaml:"backend_scheme"`
 	BackendHost   string   `yaml:"backend_host"`
+	// WSDrainTimeout is how long an instance teardown waits, after the gateway
+	// has been pointed away from the instance, for that instance's existing
+	// WebSocket tunnels to close before its containers are removed. Draining
+	// the route only stops NEW connections; established tunnels stay bound to
+	// the instance they were opened against, so without this wait a
+	// decommission severs every one of them at compose down. Zero disables the
+	// wait (the pre-WebSocket behaviour).
+	WSDrainTimeout duration `yaml:"ws_drain_timeout"`
 }
 
 type LogConfig struct {
@@ -191,9 +199,10 @@ func defaults() *Config {
 			AgentPollInterval: duration{2 * time.Second},
 		},
 		Gateway: GatewayConfig{
-			Timeout:       duration{10 * time.Second},
-			BackendScheme: "http",
-			BackendHost:   "host.docker.internal",
+			Timeout:        duration{10 * time.Second},
+			BackendScheme:  "http",
+			BackendHost:    "host.docker.internal",
+			WSDrainTimeout: duration{30 * time.Second},
 		},
 		Log:           LogConfig{Level: "info"},
 		Auth:          AuthConfig{TokenTTL: duration{24 * time.Hour}},
