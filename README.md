@@ -141,7 +141,17 @@ generates all secrets on first run.
 The admin username/password generated on first run are printed at the end of
 `up`. This is a single-machine dev/staging quickstart — for a real multi-machine
 setup, provision `agenda-node` on each target host and add machines through the
-web console.
+web console. For a remote node, create its Agent Machine first, copy the
+ID/token, and run the interactive installer on the target host:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FredrickUnderwood/Agenda-V2/master/install-node.sh -o install-node.sh
+sudo bash install-node.sh
+```
+
+It validates the ID/token/control-plane API tuple, prepares persistent config
+and workspace directories, and starts the node with Docker Compose. See
+[`cmd/agenda-node/README.md`](cmd/agenda-node/README.md) for details.
 
 ## Deploy your own app
 

@@ -127,7 +127,16 @@ MySQL + Redis + 三个二进制 + Web 控制台,并在首次运行时生成所�
 
 首次运行生成的管理员用户名/密码会在 `up` 结束时打印。这是单机开发/预发的快速上手,
 不是生产拓扑指南——真正多机部署时,在每台目标机器上分别装 `agenda-node`,再通过 Web
-控制台添加机器。
+控制台添加机器。远程节点可以先在控制台创建 Agent Machine 并复制 ID/token，然后在目标
+机器运行交互式安装器：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FredrickUnderwood/Agenda-V2/master/install-node.sh -o install-node.sh
+sudo bash install-node.sh
+```
+
+安装器会校验 ID/token/Central API，创建持久化配置和 workspace，并通过 Docker Compose
+直接启动节点。详细说明见 [`cmd/agenda-node/README.md`](cmd/agenda-node/README.md)。
 
 ## 部署你自己的应用
 

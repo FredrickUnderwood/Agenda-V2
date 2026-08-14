@@ -25,6 +25,29 @@ full design in [`doc/agenda-node-tech-design.md`](../../doc/agenda-node-tech-des
 Both are equivalent to the old "control plane can SSH / gateway can reach the
 port" trust boundaries — lock them down at the firewall the same way.
 
+## Interactive Docker install
+
+First add the agent-mode machine in the web console and copy the returned
+machine ID and one-time agent token. On the target machine, download and inspect
+the installer, then run it as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FredrickUnderwood/Agenda-V2/master/install-node.sh -o install-node.sh
+less install-node.sh
+sudo bash install-node.sh
+```
+
+The installer asks only for the machine ID, agent token, and control-plane API
+base URL. It validates them against the heartbeat endpoint before building the
+container, creates `/opt/agenda-node/config/agenda-node.yaml` and
+`/root/.agenda-v2/workspaces`, then starts the node with Docker Compose.
+
+Docker Engine with the Compose v2 plugin must already be installed. Port 7100
+must be reachable from the control plane and port 7200 from `agenda-gateway`.
+When running directly from a source checkout, `sudo ./install-node.sh` builds
+that checkout; otherwise the installer clones the `master` branch into
+`/opt/agenda-node/source`.
+
 ## Install (recommended: systemd)
 
 1. Build the binary: `go build -o agenda-node ./cmd/agenda-node` (or grab a
