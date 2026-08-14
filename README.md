@@ -150,7 +150,9 @@ sudo bash install-node.sh
 ```
 
 It validates the ID/token/control-plane API tuple, prepares persistent config
-and workspace directories, and starts the node with Docker Compose. See
+and workspace directories, and starts the node with Docker Compose. Re-running
+it reuses the existing config and updates/rebuilds the container without asking
+for the values again; use `--reconfigure` to replace them. See
 [`cmd/agenda-node/README.md`](cmd/agenda-node/README.md) for details.
 
 ## Deploy your own app

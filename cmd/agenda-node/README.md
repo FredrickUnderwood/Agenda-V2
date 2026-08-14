@@ -42,6 +42,25 @@ base URL. It validates them against the heartbeat endpoint before building the
 container, creates `/opt/agenda-node/config/agenda-node.yaml` and
 `/root/.agenda-v2/workspaces`, then starts the node with Docker Compose.
 
+Running the installer again is non-interactive: it validates and reuses the
+existing config, updates the installer-managed source checkout to the selected
+`AGENDA_NODE_REPO_REF`, and rebuilds/redeploys the container. To replace the
+machine ID, token, or control-plane address explicitly, run:
+
+```bash
+sudo bash install-node.sh --reconfigure
+```
+
+An invalid existing config stops with a field-level error instead of silently
+overwriting secrets. A source checkout supplied through
+`AGENDA_NODE_SOURCE_DIR` (or the checkout containing the script) is built as-is
+and is never automatically modified. The installer also refuses to update its
+own `/opt/agenda-node/source` checkout when it contains local changes.
+The selected repository URL and ref are persisted under `/opt/agenda-node`, so
+an upgrade continues following the same feature branch or tag without requiring
+the environment variables again. Supplying either variable explicitly on a
+later run changes and persists that selection.
+
 Docker Engine with the Compose v2 plugin must already be installed. Port 7100
 must be reachable from the control plane and port 7200 from `agenda-gateway`.
 When running directly from a source checkout, `sudo ./install-node.sh` builds

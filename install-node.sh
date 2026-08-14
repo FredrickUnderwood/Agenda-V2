@@ -14,12 +14,21 @@ DEFAULT_REPO_REF="master"
 
 INSTALL_DIR="${AGENDA_NODE_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 WORKSPACE_ROOT="${AGENDA_NODE_WORKSPACE_ROOT:-$DEFAULT_WORKSPACE_ROOT}"
+REPO_URL_EXPLICIT=false
+REPO_REF_EXPLICIT=false
+[[ -n "${AGENDA_NODE_REPO_URL+x}" ]] && REPO_URL_EXPLICIT=true
+[[ -n "${AGENDA_NODE_REPO_REF+x}" ]] && REPO_REF_EXPLICIT=true
 REPO_URL="${AGENDA_NODE_REPO_URL:-$DEFAULT_REPO_URL}"
 REPO_REF="${AGENDA_NODE_REPO_REF:-$DEFAULT_REPO_REF}"
 CONFIG_DIR="$INSTALL_DIR/config"
 CONFIG_FILE="$CONFIG_DIR/agenda-node.yaml"
 COMPOSE_ENV_FILE="$INSTALL_DIR/compose.env"
+REPO_URL_FILE="$INSTALL_DIR/repo-url"
+REPO_REF_FILE="$INSTALL_DIR/repo-ref"
 SOURCE_DIR=""
+SOURCE_MANAGED=false
+SOURCE_WAS_CLONED=false
+RECONFIGURE=false
 PROMPT_RESULT=""
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -32,7 +41,6 @@ require_bin() {
 
 check_prereqs() {
     [[ "$EUID" -eq 0 ]] || die "请使用 root 运行：sudo bash install-node.sh"
-    [[ -r /dev/tty && -w /dev/tty ]] || die "该脚本需要交互式终端 (/dev/tty)"
     require_bin docker "请先安装 Docker Engine"
     docker compose version >/dev/null 2>&1 || die "未找到 Docker Compose v2 插件"
     docker info >/dev/null 2>&1 || die "Docker daemon 不可用，请先启动 Docker"
@@ -41,6 +49,7 @@ check_prereqs() {
 
 prompt_required() {
     local label="$1" secret="${2:-false}" value=""
+    [[ -r /dev/tty && -w /dev/tty ]] || die "首次安装或 --reconfigure 需要交互式终端 (/dev/tty)"
     while [[ -z "$value" ]]; do
         printf '%s: ' "$label" >/dev/tty
         if [[ "$secret" == "true" ]]; then
@@ -90,13 +99,54 @@ prompt_central_api() {
     done
 }
 
-confirm_overwrite() {
-    [[ -f "$CONFIG_FILE" ]] || return
-    warn "已存在配置：$CONFIG_FILE"
-    local answer=""
-    printf '重新填写并覆盖它？[y/N]: ' >/dev/tty
-    IFS= read -r answer </dev/tty || die "读取输入失败"
-    [[ "$answer" == "y" || "$answer" == "Y" ]] || die "已取消，现有配置未改动"
+usage() {
+    cat <<'EOF'
+Usage: sudo bash install-node.sh [--reconfigure]
+
+Without options:
+  - first install: ask for Machine ID, Agent token, and Central API
+  - repeated run: reuse the existing config and redeploy without prompts
+
+Options:
+  --reconfigure  Ask for all values again and replace the existing config
+  -h, --help     Show this help
+
+Environment overrides:
+  AGENDA_NODE_REPO_REF        Git branch/tag to install (default: master)
+  AGENDA_NODE_REPO_URL        Source repository URL
+  AGENDA_NODE_SOURCE_DIR      Build an existing checkout; never auto-update it
+  AGENDA_NODE_INSTALL_DIR     Persistent installer directory
+  AGENDA_NODE_WORKSPACE_ROOT  Deployment workspace path
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --reconfigure) RECONFIGURE=true ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "未知参数：$1（使用 --help 查看帮助）" ;;
+        esac
+        shift
+    done
+}
+
+load_source_settings() {
+    if [[ "$REPO_URL_EXPLICIT" == "false" && -s "$REPO_URL_FILE" ]]; then
+        IFS= read -r REPO_URL <"$REPO_URL_FILE" || die "无法读取 $REPO_URL_FILE"
+    fi
+    if [[ "$REPO_REF_EXPLICIT" == "false" && -s "$REPO_REF_FILE" ]]; then
+        IFS= read -r REPO_REF <"$REPO_REF_FILE" || die "无法读取 $REPO_REF_FILE"
+    fi
+    [[ "$REPO_URL" != *[[:space:]]* && -n "$REPO_URL" ]] || die "源码仓库 URL 无效"
+    [[ "$REPO_REF" != *[[:space:]]* && -n "$REPO_REF" ]] || die "源码分支/tag 无效"
+}
+
+persist_source_settings() {
+    [[ "$SOURCE_MANAGED" == "true" ]] || return
+    printf '%s\n' "$REPO_URL" >"$REPO_URL_FILE"
+    printf '%s\n' "$REPO_REF" >"$REPO_REF_FILE"
+    chmod 600 "$REPO_URL_FILE" "$REPO_REF_FILE"
 }
 
 resolve_source_dir() {
@@ -114,6 +164,7 @@ resolve_source_dir() {
     else
         require_bin git "用于下载 agenda-v2 源码"
         SOURCE_DIR="$INSTALL_DIR/source"
+        SOURCE_MANAGED=true
         if [[ -d "$SOURCE_DIR/.git" ]]; then
             log "复用已有源码：$SOURCE_DIR"
         elif [[ -e "$SOURCE_DIR" ]]; then
@@ -121,9 +172,36 @@ resolve_source_dir() {
         else
             log "下载 agenda-v2 源码到 $SOURCE_DIR"
             git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SOURCE_DIR"
+            SOURCE_WAS_CLONED=true
         fi
     fi
 
+}
+
+update_managed_source() {
+    [[ "$SOURCE_MANAGED" == "true" ]] || {
+        log "使用现有源码 checkout，不自动修改：$SOURCE_DIR"
+        return
+    }
+    [[ "$SOURCE_WAS_CLONED" == "false" ]] || return
+
+    if [[ -n "$(git -C "$SOURCE_DIR" status --porcelain)" ]]; then
+        die "托管源码存在本地改动，已停止自动更新：$SOURCE_DIR"
+    fi
+
+    local current_repo_url
+    current_repo_url="$(git -C "$SOURCE_DIR" remote get-url origin)"
+    if [[ "$current_repo_url" != "$REPO_URL" ]]; then
+        log "更新托管源码仓库地址"
+        git -C "$SOURCE_DIR" remote set-url origin "$REPO_URL"
+    fi
+
+    log "更新托管源码到 $REPO_REF"
+    git -C "$SOURCE_DIR" fetch --depth 1 origin "$REPO_REF"
+    git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
+}
+
+validate_source_layout() {
     [[ -f "$SOURCE_DIR/cmd/agenda-node/docker-compose.yml" ]] || die "源码中缺少 cmd/agenda-node/docker-compose.yml"
     [[ -f "$SOURCE_DIR/cmd/agenda-node/Dockerfile" ]] || die "源码中缺少 cmd/agenda-node/Dockerfile"
     grep -q 'AGENDA_NODE_CONFIG_DIR' "$SOURCE_DIR/cmd/agenda-node/docker-compose.yml" \
@@ -168,15 +246,38 @@ probe_heartbeat() {
     esac
 }
 
+prepare_runtime_paths() {
+    mkdir -p "$CONFIG_DIR" "$WORKSPACE_ROOT"
+    chmod 700 "$CONFIG_DIR"
+
+    cat >"$COMPOSE_ENV_FILE" <<EOF
+AGENDA_NODE_CONFIG_DIR=$CONFIG_DIR
+AGENDA_NODE_WORKSPACE_ROOT=$WORKSPACE_ROOT
+EOF
+    chmod 600 "$COMPOSE_ENV_FILE"
+}
+
+validate_existing_config() {
+    local -a invalid_fields=()
+    grep -Eq '^machine_id:[[:space:]]*[1-9][0-9]*[[:space:]]*$' "$CONFIG_FILE" || invalid_fields+=("machine_id")
+    grep -Eq '^token:[[:space:]]*".+"[[:space:]]*$' "$CONFIG_FILE" || invalid_fields+=("token")
+    grep -Eq '^central_base_url:[[:space:]]*"https?://.+"[[:space:]]*$' "$CONFIG_FILE" || invalid_fields+=("central_base_url")
+
+    if [[ ${#invalid_fields[@]} -gt 0 ]]; then
+        die "现有配置缺少或包含无效字段：${invalid_fields[*]}。请使用 --reconfigure 修复"
+    fi
+    chmod 600 "$CONFIG_FILE"
+    log "复用已有配置：$CONFIG_FILE"
+}
+
 render_files() {
     local machine_id="$1" agent_token="$2" central_api="$3"
     local token_yaml central_yaml
     token_yaml="$(yaml_quote "$agent_token")"
     central_yaml="$(yaml_quote "$central_api")"
 
-    log "创建安装目录和 workspace"
-    mkdir -p "$CONFIG_DIR" "$WORKSPACE_ROOT"
-    chmod 700 "$CONFIG_DIR"
+    log "写入 agenda-node 配置"
+    prepare_runtime_paths
 
     cat >"$CONFIG_FILE" <<EOF
 listen_addr: "0.0.0.0:7100"
@@ -195,12 +296,30 @@ job_retention: "1h"
 proxy_drain_timeout: "30s"
 EOF
     chmod 600 "$CONFIG_FILE"
+}
 
-    cat >"$COMPOSE_ENV_FILE" <<EOF
-AGENDA_NODE_CONFIG_DIR=$CONFIG_DIR
-AGENDA_NODE_WORKSPACE_ROOT=$WORKSPACE_ROOT
-EOF
-    chmod 600 "$COMPOSE_ENV_FILE"
+configure_node() {
+    if [[ -f "$CONFIG_FILE" && "$RECONFIGURE" == "false" ]]; then
+        prepare_runtime_paths
+        validate_existing_config
+        return
+    fi
+
+    if [[ "$RECONFIGURE" == "true" && -f "$CONFIG_FILE" ]]; then
+        log "--reconfigure 已启用，将重新填写并替换现有配置"
+    else
+        log "未找到现有配置，进入首次安装"
+    fi
+
+    prompt_machine_id
+    local machine_id="$PROMPT_RESULT"
+    prompt_required "Agent token" true
+    local agent_token="$PROMPT_RESULT"
+    prompt_central_api
+    local central_api="$PROMPT_RESULT"
+
+    probe_heartbeat "$machine_id" "$agent_token" "$central_api"
+    render_files "$machine_id" "$agent_token" "$central_api"
 }
 
 deploy_node() {
@@ -227,6 +346,7 @@ deploy_node() {
             printf '  代理端口：7200（仅允许 agenda-gateway 访问）\n'
             printf '  查看日志：docker compose --project-name agenda-node --env-file %q -f %q logs -f agenda-node\n' \
                 "$COMPOSE_ENV_FILE" "$SOURCE_DIR/cmd/agenda-node/docker-compose.yml"
+            printf '  重新配置：sudo bash install-node.sh --reconfigure\n'
             printf '\n请回到 Machines 页面确认状态已变为 Online。\n'
             return
         fi
@@ -238,20 +358,15 @@ deploy_node() {
 }
 
 main() {
+    parse_args "$@"
     check_prereqs
     mkdir -p "$INSTALL_DIR"
+    load_source_settings
     resolve_source_dir
-    confirm_overwrite
-
-    prompt_machine_id
-    local machine_id="$PROMPT_RESULT"
-    prompt_required "Agent token" true
-    local agent_token="$PROMPT_RESULT"
-    prompt_central_api
-    local central_api="$PROMPT_RESULT"
-
-    probe_heartbeat "$machine_id" "$agent_token" "$central_api"
-    render_files "$machine_id" "$agent_token" "$central_api"
+    update_managed_source
+    validate_source_layout
+    persist_source_settings
+    configure_node
     deploy_node
 }
 

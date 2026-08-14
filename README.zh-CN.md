@@ -136,7 +136,9 @@ sudo bash install-node.sh
 ```
 
 安装器会校验 ID/token/Central API，创建持久化配置和 workspace，并通过 Docker Compose
-直接启动节点。详细说明见 [`cmd/agenda-node/README.md`](cmd/agenda-node/README.md)。
+直接启动节点。再次运行会自动复用已有配置并更新、重建容器，不需要重新填写；只有使用
+`--reconfigure` 才会重新采集并替换配置。详细说明见
+[`cmd/agenda-node/README.md`](cmd/agenda-node/README.md)。
 
 ## 部署你自己的应用
 
