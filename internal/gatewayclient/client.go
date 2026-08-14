@@ -101,3 +101,64 @@ func (c *Client) PutTLSConfig(ctx context.Context, req contract.UpdateTLSConfigR
 	}
 	return nil
 }
+
+// WebSocketStat is one row of GET /-/ws/connections: how many tunnels a given
+// (route, instance) pair currently holds on the gateway.
+type WebSocketStat struct {
+	RouteKey string `json:"route_key"`
+	Instance string `json:"instance"`
+	Active   int    `json:"active"`
+}
+
+type webSocketConnectionsResponse struct {
+	Data   []WebSocketStat `json:"data"`
+	Active int             `json:"active"`
+}
+
+// ActiveWebSocketConnections returns how many WebSocket tunnels the gateway
+// still holds for an instance, optionally narrowed to one route.
+//
+// Used by the decommission pipeline: after the route has been pointed away from
+// an instance, tunnels opened before that are still attached to it, and the
+// only way to avoid cutting them is to ask the gateway whether any remain.
+func (c *Client) ActiveWebSocketConnections(ctx context.Context, routeKey, instance string) (int, error) {
+	if c == nil || c.baseURL == "" {
+		return 0, errors.New("gateway base_url is required")
+	}
+	if c.serviceToken == "" {
+		return 0, errors.New("gateway service_token is required")
+	}
+	endpoint := c.baseURL + "/-/ws/connections"
+	query := url.Values{}
+	if routeKey != "" {
+		query.Set("route_key", routeKey)
+	}
+	if instance != "" {
+		query.Set("instance", instance)
+	}
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	httpReq.Header.Set(serviceTokenHeader, c.serviceToken)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, errors.New("gateway list websocket connections failed: " + resp.Status + ": " + strings.TrimSpace(string(body)))
+	}
+	var out webSocketConnectionsResponse
+	if err := sonic.Unmarshal(body, &out); err != nil {
+		return 0, err
+	}
+	return out.Active, nil
+}

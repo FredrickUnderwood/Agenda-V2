@@ -46,10 +46,17 @@ export function GatewayTable({ model }: { model: GatewayModel }) {
             title: 'Inbound',
             key: 'inbound',
             render: (_, r) => (
-              <span className="agenda-mono" style={{ fontSize: 13 }}>
-                <span style={{ color: r.host ? undefined : color.ink500 }}>{r.host || '* any'}</span>
-                <span style={{ fontWeight: 600 }}>{r.pathPrefix || '/'}</span>
-              </span>
+              <Space size={6}>
+                <span className="agenda-mono" style={{ fontSize: 13 }}>
+                  <span style={{ color: r.host ? undefined : color.ink500 }}>{r.host || '* any'}</span>
+                  <span style={{ fontWeight: 600 }}>{r.pathPrefix || '/'}</span>
+                </span>
+                {r.upgradeMode === 'websocket' && (
+                  <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                    WS
+                  </Tag>
+                )}
+              </Space>
             ),
           },
           { title: 'Route key', dataIndex: 'routeKey', render: (v: string) => <span className="agenda-mono">{v}</span> },

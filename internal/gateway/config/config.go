@@ -23,6 +23,11 @@ type Config struct {
 
 type ServerConfig struct {
 	Addr string
+	// MaxHeaderBytes bounds request headers on the data plane. Explicit rather
+	// than left at net/http's 1MB default because a WebSocket handshake is
+	// header-only and cheap to send: a caller can otherwise make the gateway
+	// buffer a megabyte per in-flight handshake for free.
+	MaxHeaderBytes int
 }
 
 type MySQLConfig struct {
@@ -49,6 +54,31 @@ type ServiceTokenConfig struct {
 type GatewayConfig struct {
 	RefreshInterval       time.Duration
 	DefaultBackendTimeout time.Duration
+	WebSocket             WebSocketConfig
+}
+
+// WebSocketConfig holds the gateway-wide WebSocket settings. Per-route settings
+// (whether upgrades are allowed at all, the route's own idle timeout, its
+// connection cap, its Origin allowlist) live on the route in the database —
+// these are the ones that describe this gateway process's capacity, which no
+// individual route's author is in a position to know.
+type WebSocketConfig struct {
+	// DefaultIdleTimeout applies to routes that don't set their own.
+	DefaultIdleTimeout time.Duration
+	// MaxConnections / MaxConnectionsPerIP: 0 disables that cap.
+	MaxConnections      int
+	MaxConnectionsPerIP int
+	// HandshakeRate is handshakes/second across the gateway; 0 disables the
+	// throttle. HandshakeBurst defaults to one second's worth.
+	HandshakeRate  float64
+	HandshakeBurst int
+	// DialTimeout / ResponseHeaderTimeout bound the upstream handshake, which
+	// runs without the route's total request timeout.
+	DialTimeout           time.Duration
+	ResponseHeaderTimeout time.Duration
+	// DrainTimeout is how long shutdown waits for live tunnels to end on their
+	// own before force-closing them.
+	DrainTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -56,7 +86,8 @@ func Load() (*Config, error) {
 		AppName:  env("GATEWAY_APP_NAME", "agenda-gateway"),
 		LogLevel: env("GATEWAY_LOG_LEVEL", "info"),
 		Server: ServerConfig{
-			Addr: env("GATEWAY_ADDR", ":8080"),
+			Addr:           env("GATEWAY_ADDR", ":8080"),
+			MaxHeaderBytes: intEnv("GATEWAY_MAX_HEADER_BYTES", 64*1024),
 		},
 		MySQL: MySQLConfig{
 			DSN:             os.Getenv("GATEWAY_DATABASE_DSN"),
@@ -70,6 +101,16 @@ func Load() (*Config, error) {
 		Gateway: GatewayConfig{
 			RefreshInterval:       durationEnv("GATEWAY_REFRESH_INTERVAL", 2*time.Second),
 			DefaultBackendTimeout: durationEnv("GATEWAY_BACKEND_TIMEOUT", 30*time.Second),
+			WebSocket: WebSocketConfig{
+				DefaultIdleTimeout:    durationEnv("GATEWAY_WS_IDLE_TIMEOUT", 5*time.Minute),
+				MaxConnections:        intEnv("GATEWAY_WS_MAX_CONNECTIONS", 0),
+				MaxConnectionsPerIP:   intEnv("GATEWAY_WS_MAX_CONNECTIONS_PER_IP", 0),
+				HandshakeRate:         floatEnv("GATEWAY_WS_HANDSHAKE_RATE", 0),
+				HandshakeBurst:        intEnv("GATEWAY_WS_HANDSHAKE_BURST", 0),
+				DialTimeout:           durationEnv("GATEWAY_WS_DIAL_TIMEOUT", 5*time.Second),
+				ResponseHeaderTimeout: durationEnv("GATEWAY_WS_HANDSHAKE_TIMEOUT", 10*time.Second),
+				DrainTimeout:          durationEnv("GATEWAY_WS_DRAIN_TIMEOUT", 30*time.Second),
+			},
 		},
 	}
 	cfg.ServiceTokens = serviceTokensFromEnv()
@@ -144,6 +185,18 @@ func intEnv(key string, fallback int) int {
 		return fallback
 	}
 	return i
+}
+
+func floatEnv(key string, fallback float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return f
 }
 
 func durationEnv(key string, fallback time.Duration) time.Duration {

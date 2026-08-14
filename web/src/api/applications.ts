@@ -65,3 +65,11 @@ export function decommissionInstance(appId: number, targetId: number) {
     .post<DeployLog>(`/applications/${appId}/instances/${targetId}/decommission`)
     .then((r) => r.data)
 }
+
+// deleteInstance permanently removes a decommissioned instance's record, along
+// with its health row and any gateway route pins naming it. Deploy logs and
+// releases are kept as history. The API refuses (409) unless the instance has
+// been decommissioned first — see the backend's DeleteInstance for why.
+export function deleteInstance(appId: number, targetId: number) {
+  return apiClient.delete<void>(`/applications/${appId}/instances/${targetId}`).then((r) => r.data)
+}

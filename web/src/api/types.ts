@@ -18,6 +18,9 @@ export type EnvDeploymentStatus = 'pending' | 'running' | 'success' | 'partial_f
 export type SettingType = 'string' | 'int' | 'bool' | 'json'
 export type GatewayBackendMode = 'single' | 'all_enabled' | 'selected'
 export type GatewayInstanceSelectMode = 'disabled' | 'enabled'
+// Whether the gateway may turn a request on this route into a protocol upgrade.
+// 'none' (the default) rejects Upgrade requests outright.
+export type GatewayUpgradeMode = 'none' | 'websocket'
 
 export interface Application {
   id: number
@@ -53,6 +56,17 @@ export interface ApplicationGatewayRoute {
   instance_select_mode: GatewayInstanceSelectMode
   instance_header: string
   sort_order: number
+  upgrade_mode: GatewayUpgradeMode
+  // Ordinary HTTP total timeout; 0 = the gateway's default. Never applied to a
+  // WebSocket — a total deadline on a tunnel is a scheduled disconnect, not a
+  // timeout — which is what websocket_idle_timeout_ms is for.
+  request_timeout_ms: number
+  // 0 = gateway default, negative = no idle timeout (app must Ping to stay honest).
+  websocket_idle_timeout_ms: number
+  // 0 = unlimited for this route (the gateway-wide cap still applies).
+  websocket_max_connections: number
+  // Comma-separated Origin allowlist for browser handshakes; empty = any origin.
+  websocket_allowed_origins: string
   backends?: ApplicationGatewayRouteBackend[]
 }
 
@@ -129,6 +143,11 @@ export interface ApplicationGatewayRouteRequest {
   instance_header?: string
   backends: ApplicationGatewayRouteBackendRequest[]
   sort_order?: number
+  upgrade_mode?: GatewayUpgradeMode
+  request_timeout_ms?: number
+  websocket_idle_timeout_ms?: number
+  websocket_max_connections?: number
+  websocket_allowed_origins?: string
 }
 
 export interface ApplicationEnvTargetRequest {

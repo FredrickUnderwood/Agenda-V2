@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd'
-import { PlusOutlined, ReloadOutlined, PoweroffOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, PoweroffOutlined, DeleteOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import * as api from '@/api/applications'
 import * as machinesApi from '@/api/machines'
@@ -87,6 +87,15 @@ export function InstancesTab({ appId }: { appId: number }) {
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (targetId: number) => api.deleteInstance(appId, targetId),
+    onSuccess: () => {
+      message.success('Instance deleted.')
+      queryClient.invalidateQueries({ queryKey: ['applications', appId] })
+    },
+    onError: (err: unknown) => message.error(errorMessage(err)),
+  })
+
   const instances = data?.data ?? []
 
   const confirmDecommission = (record: ApplicationEnvTarget) => {
@@ -113,6 +122,36 @@ export function InstancesTab({ appId }: { appId: number }) {
         </div>
       ),
       onOk: () => decommissionMutation.mutateAsync(record.id),
+    })
+  }
+
+  const confirmDelete = (record: ApplicationEnvTarget) => {
+    const lastInEnv = instances.filter((t) => t.env === record.env).length === 1
+    modal.confirm({
+      title: `Delete ${record.env}/${record.instance_name}?`,
+      okText: 'Delete',
+      okButtonProps: { danger: true },
+      width: 520,
+      content: (
+        <div>
+          <Typography.Paragraph style={{ marginBottom: 12 }}>
+            This permanently removes the instance record. Deploy logs and releases are kept as
+            history. This cannot be undone — recreating the instance starts it from scratch.
+          </Typography.Paragraph>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: lastInEnv ? 12 : 0 }}>
+            Containers and volumes were already removed when the instance was decommissioned. If
+            that teardown never finished (the machine was offline), deleting the record abandons the
+            retry — remove those containers on the machine by hand.
+          </Typography.Paragraph>
+          {lastInEnv && (
+            <Typography.Paragraph type="danger" style={{ marginBottom: 0 }}>
+              ⚠ This is the last instance in <span className="agenda-mono">{record.env}</span> — that
+              environment's gateway routes will be disabled (their host/path config is kept).
+            </Typography.Paragraph>
+          )}
+        </div>
+      ),
+      onOk: () => deleteMutation.mutateAsync(record.id),
     })
   }
 
@@ -190,11 +229,24 @@ export function InstancesTab({ appId }: { appId: number }) {
             render: (_, record) =>
               // A stopped instance has no containers to health-check, and it is
               // brought back by deploying it (there is no recommission) — so its
-              // only affordance is a hint pointing at the Deploy flow.
+              // affordances are a hint pointing at the Deploy flow, plus Delete,
+              // which is only offered here: deleting a running instance would
+              // orphan its containers and its gateway backends.
               record.desired_state === 'stopped' ? (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  Stopped · deploy to restart
-                </Typography.Text>
+                <Space size="small">
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    Stopped · deploy to restart
+                  </Typography.Text>
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={deleteMutation.isPending && deleteMutation.variables === record.id}
+                    onClick={() => confirmDelete(record)}
+                  >
+                    Delete
+                  </Button>
+                </Space>
               ) : (
                 <Space size="small">
                   <Button

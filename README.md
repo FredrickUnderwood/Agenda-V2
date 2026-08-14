@@ -48,6 +48,9 @@ frontend + backend apps** on machines *you* control.
   weighted, health-gated backends, per-endpoint metrics (QPS / error rate /
   latency percentiles), and **embedded edge TLS** via ACME DNS-01 (no separate
   Caddy/nginx). See [doc/gateway-edge-tls.md](doc/gateway-edge-tls.md).
+  **WebSocket** is supported per route (opt-in), with idle timeouts, connection
+  caps, an Origin allowlist, dedicated metrics, and connection draining on
+  restart and decommission. See [doc/gateway-websocket.md](doc/gateway-websocket.md).
 - **Observability** — per-instance log tailing, Prometheus metrics, and Grafana
   dashboards reverse-proxied under the web console. Apps expose custom metrics
   through the SDK; the control plane scrapes them via the node relay (no direct
@@ -138,7 +141,19 @@ generates all secrets on first run.
 The admin username/password generated on first run are printed at the end of
 `up`. This is a single-machine dev/staging quickstart — for a real multi-machine
 setup, provision `agenda-node` on each target host and add machines through the
-web console.
+web console. For a remote node, create its Agent Machine first, copy the
+ID/token, and run the interactive installer on the target host:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FredrickUnderwood/Agenda-V2/master/install-node.sh -o install-node.sh
+sudo bash install-node.sh
+```
+
+It validates the ID/token/control-plane API tuple, prepares persistent config
+and workspace directories, and starts the node with Docker Compose. Re-running
+it reuses the existing config and updates/rebuilds the container without asking
+for the values again; use `--reconfigure` to replace them. See
+[`cmd/agenda-node/README.md`](cmd/agenda-node/README.md) for details.
 
 ## Deploy your own app
 

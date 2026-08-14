@@ -23,6 +23,7 @@ import type {
   Environment,
   GatewayBackendMode,
   GatewayInstanceSelectMode,
+  GatewayUpgradeMode,
 } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
 import { RefreshButton } from '@/components/RefreshButton'
@@ -43,6 +44,11 @@ interface RouteFormValues {
   instance_select_mode: GatewayInstanceSelectMode
   instance_header?: string
   backends?: { target_id: number; weight: number }[]
+  upgrade_mode: GatewayUpgradeMode
+  request_timeout_ms?: number
+  websocket_idle_timeout_ms?: number
+  websocket_max_connections?: number
+  websocket_allowed_origins?: string
 }
 
 // A route rendered in the table, tagged with its env for grouping.
@@ -59,6 +65,7 @@ export function RoutesTab({ appId }: { appId: number }) {
   const backendMode = Form.useWatch('backend_mode', form)
   const selectMode = Form.useWatch('instance_select_mode', form)
   const formEnv = Form.useWatch('env', form)
+  const upgradeMode = Form.useWatch('upgrade_mode', form)
 
   const { data, isLoading } = useQuery({
     queryKey: ['applications', appId, 'instances'],
@@ -114,6 +121,7 @@ export function RoutesTab({ appId }: { appId: number }) {
       instance_select_mode: 'disabled',
       instance_header: DEFAULT_INSTANCE_HEADER,
       backends: [],
+      upgrade_mode: 'none',
     })
     setModalOpen(true)
   }
@@ -132,6 +140,11 @@ export function RoutesTab({ appId }: { appId: number }) {
       instance_select_mode: route.instance_select_mode,
       instance_header: route.instance_header || DEFAULT_INSTANCE_HEADER,
       backends: (route.backends ?? []).map((b) => ({ target_id: b.target_id, weight: b.weight })),
+      upgrade_mode: route.upgrade_mode || 'none',
+      request_timeout_ms: route.request_timeout_ms || undefined,
+      websocket_idle_timeout_ms: route.websocket_idle_timeout_ms || undefined,
+      websocket_max_connections: route.websocket_max_connections || undefined,
+      websocket_allowed_origins: route.websocket_allowed_origins,
     })
     setModalOpen(true)
   }
@@ -160,6 +173,17 @@ export function RoutesTab({ appId }: { appId: number }) {
         values.backend_mode === 'selected'
           ? (values.backends ?? []).map((b) => ({ target_id: b.target_id, weight: b.weight || 100 }))
           : [],
+      upgrade_mode: values.upgrade_mode,
+      request_timeout_ms: values.request_timeout_ms ?? 0,
+      // WebSocket settings are only meaningful on an upgradable route; zero
+      // them when it isn't, so turning WebSocket off doesn't leave stale caps
+      // behind to surprise whoever turns it back on.
+      websocket_idle_timeout_ms:
+        values.upgrade_mode === 'websocket' ? values.websocket_idle_timeout_ms ?? 0 : 0,
+      websocket_max_connections:
+        values.upgrade_mode === 'websocket' ? values.websocket_max_connections ?? 0 : 0,
+      websocket_allowed_origins:
+        values.upgrade_mode === 'websocket' ? (values.websocket_allowed_origins ?? '').trim() : '',
     }
 
     const routes = editing
@@ -219,6 +243,12 @@ export function RoutesTab({ appId }: { appId: number }) {
                 : r.backend_mode === 'all_enabled'
                   ? 'all enabled'
                   : 'single',
+          },
+          {
+            title: 'Protocol',
+            key: 'upgrade_mode',
+            render: (_, r) =>
+              r.upgrade_mode === 'websocket' ? <Tag color="blue">WebSocket</Tag> : <span style={{ opacity: 0.5 }}>HTTP</span>,
           },
           {
             title: 'Enabled',
@@ -350,6 +380,51 @@ export function RoutesTab({ appId }: { appId: number }) {
             <Form.Item name="instance_header" label="Instance header">
               <Input placeholder={DEFAULT_INSTANCE_HEADER} />
             </Form.Item>
+          )}
+          <Form.Item
+            name="request_timeout_ms"
+            label="Request timeout (ms)"
+            extra="Total time an ordinary HTTP request may take. Leave empty for the gateway default (30s). Not applied to WebSocket connections."
+          >
+            <InputNumber min={0} step={1000} style={{ width: '100%' }} placeholder="30000" />
+          </Form.Item>
+          <Form.Item
+            name="upgrade_mode"
+            label="Protocol upgrade"
+            rules={[{ required: true }]}
+            extra="WebSocket is off unless enabled here — an upgraded request escapes the request timeout and holds a connection on the gateway and on the node for as long as it lives."
+          >
+            <Select
+              options={[
+                { value: 'none', label: 'None (reject Upgrade requests)' },
+                { value: 'websocket', label: 'WebSocket' },
+              ]}
+            />
+          </Form.Item>
+          {upgradeMode === 'websocket' && (
+            <>
+              <Form.Item
+                name="websocket_idle_timeout_ms"
+                label="WebSocket idle timeout (ms)"
+                extra="Closes a connection after this long with no traffic in either direction. Empty uses the gateway default (5 min); -1 disables it, in which case your app must send Ping frames to keep dead peers from piling up."
+              >
+                <InputNumber min={-1} step={1000} style={{ width: '100%' }} placeholder="300000" />
+              </Form.Item>
+              <Form.Item
+                name="websocket_max_connections"
+                label="Max WebSocket connections"
+                extra="Concurrent connections allowed on this route. Empty or 0 = unlimited (the gateway-wide cap still applies)."
+              >
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+              <Form.Item
+                name="websocket_allowed_origins"
+                label="Allowed origins"
+                extra="Comma-separated, e.g. https://app.example.com, *.example.com. Empty allows any origin. Browsers cannot set custom headers on a WebSocket, so this is the main defence against another site opening connections as your logged-in users."
+              >
+                <Input placeholder="https://app.example.com" />
+              </Form.Item>
+            </>
           )}
           <Form.Item name="enabled" label="Enabled" valuePropName="checked">
             <Switch />

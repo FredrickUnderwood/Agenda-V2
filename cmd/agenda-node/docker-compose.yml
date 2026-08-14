@@ -17,13 +17,16 @@ services:
       - "7100:7100" # management API (jobs, proxy registration)
       - "7200:7200" # reverse proxy (gateway backends point here)
     volumes:
-      - ./config:/app/config:ro
+      # The interactive installer keeps secrets outside the source checkout and
+      # overrides AGENDA_NODE_CONFIG_DIR via its compose.env. Local/manual runs
+      # keep the existing ./config default.
+      - ${AGENDA_NODE_CONFIG_DIR:-./config}:/app/config:ro
       # Control the host docker daemon (run deploys) from inside the container.
       - /var/run/docker.sock:/var/run/docker.sock
       # The node clones repos and runs compose under workspace_root; it must see
       # the same paths the deployments use. Keep this identical on both sides so
       # bind mounts inside deployed compose files resolve correctly.
-      - /root/.agenda-v2/workspaces:/root/.agenda-v2/workspaces
+      - ${AGENDA_NODE_WORKSPACE_ROOT:-/root/.agenda-v2/workspaces}:${AGENDA_NODE_WORKSPACE_ROOT:-/root/.agenda-v2/workspaces}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

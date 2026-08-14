@@ -59,7 +59,7 @@ func TestLoadSnapshotsSpecificHostBeforeWildcard(t *testing.T) {
 				{TargetKey: "specific", URL: "http://127.0.0.1:2", Weight: 1, Enabled: true, Healthy: true},
 			},
 		},
-	}}, 30*time.Second)
+	}}, 30*time.Second, time.Minute)
 	snapshots, err := svc.LoadSnapshots(context.Background())
 	if err != nil {
 		t.Fatalf("LoadSnapshots error = %v", err)
@@ -112,7 +112,7 @@ func TestUpsertRoundTripFromControlPlaneWire(t *testing.T) {
 	}
 	got.RouteKey = "api-pay-service-prod" // the gateway sets this from the URL path
 
-	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second)
+	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second, time.Minute)
 	route, backends, err := svc.normalizeUpsertRequest(got)
 	if err != nil {
 		t.Fatalf("normalizeUpsertRequest: %v", err)
@@ -170,7 +170,7 @@ func TestUnhealthyBackendExcludedFromSnapshot(t *testing.T) {
 	}
 	got.RouteKey = "agenda-example-prod-default"
 
-	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second)
+	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second, time.Minute)
 	route, backends, err := svc.normalizeUpsertRequest(got)
 	if err != nil {
 		t.Fatalf("normalizeUpsertRequest: %v", err)
@@ -188,5 +188,115 @@ func TestUnhealthyBackendExcludedFromSnapshot(t *testing.T) {
 	}
 	if len(snapshot.Backends) != 1 || snapshot.Backends[0].InstanceName != "blue" {
 		t.Fatalf("snapshot backends = %+v, want only healthy 'blue'", snapshot.Backends)
+	}
+}
+
+// TestUpgradeModeNormalization pins the fail-closed default: a control plane
+// that says nothing about upgrades gets a route that refuses them, and an
+// unrecognized value is an error rather than a silent "allow".
+func TestUpgradeModeNormalization(t *testing.T) {
+	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second, time.Minute)
+	base := contract.UpsertRouteRequest{
+		RouteKey:    "ws-route",
+		ServiceName: "svc",
+		Env:         "prod",
+		Host:        "api.example.com",
+		ReleaseID:   "rel-1",
+		Backends:    []contract.BackendEntry{{TargetKey: "a", URL: "http://127.0.0.1:1"}},
+	}
+
+	route, _, err := svc.normalizeUpsertRequest(base)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if route.UpgradeMode != domain.UpgradeModeNone {
+		t.Errorf("UpgradeMode = %q, want %q when unspecified", route.UpgradeMode, domain.UpgradeModeNone)
+	}
+
+	enabled := base
+	enabled.UpgradeMode = "websocket"
+	enabled.WebsocketAllowedOrigins = " https://App.Example.com/ ,, *.internal.example.com , https://app.example.com "
+	route, _, err = svc.normalizeUpsertRequest(enabled)
+	if err != nil {
+		t.Fatalf("normalize websocket: %v", err)
+	}
+	if route.UpgradeMode != domain.UpgradeModeWebSocket {
+		t.Errorf("UpgradeMode = %q, want websocket", route.UpgradeMode)
+	}
+	// Lowercased, trailing slash dropped, blanks and duplicates removed.
+	if want := "https://app.example.com,*.internal.example.com"; route.WebsocketAllowedOrigins != want {
+		t.Errorf("WebsocketAllowedOrigins = %q, want %q", route.WebsocketAllowedOrigins, want)
+	}
+
+	bad := base
+	bad.UpgradeMode = "h2c"
+	if _, _, err := svc.normalizeUpsertRequest(bad); err == nil {
+		t.Error("normalize accepted an unknown upgrade_mode")
+	}
+
+	negative := base
+	negative.WebsocketMaxConnections = -1
+	if _, _, err := svc.normalizeUpsertRequest(negative); err == nil {
+		t.Error("normalize accepted a negative websocket_max_connections")
+	}
+}
+
+func TestSnapshotWebSocketSettings(t *testing.T) {
+	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second, 90*time.Second)
+	base := domain.Route{
+		RouteKey:         "ws",
+		Host:             "api.example.com",
+		PathPrefix:       "/",
+		CurrentReleaseID: "r1",
+		TimeoutMs:        1000,
+		UpgradeMode:      domain.UpgradeModeWebSocket,
+		Backends:         []domain.Backend{{TargetKey: "a", URL: "http://127.0.0.1:1", Weight: 1, Enabled: true, Healthy: true}},
+	}
+
+	// 0 => the gateway-wide default.
+	if got := svc.toSnapshot(base).WebsocketIdleTimeout; got != 90*time.Second {
+		t.Errorf("idle timeout = %v, want the 90s gateway default", got)
+	}
+
+	explicit := base
+	explicit.WebsocketIdleTimeoutMs = 5000
+	if got := svc.toSnapshot(explicit).WebsocketIdleTimeout; got != 5*time.Second {
+		t.Errorf("idle timeout = %v, want 5s", got)
+	}
+
+	// Negative => explicitly no idle timeout, which the proxy reads as zero.
+	disabled := base
+	disabled.WebsocketIdleTimeoutMs = -1
+	if got := svc.toSnapshot(disabled).WebsocketIdleTimeout; got != 0 {
+		t.Errorf("idle timeout = %v, want 0 (disabled)", got)
+	}
+
+	origins := base
+	origins.WebsocketAllowedOrigins = "https://a.example.com,https://b.example.com"
+	if got := svc.toSnapshot(origins).WebsocketAllowedOrigins; len(got) != 2 {
+		t.Errorf("allowed origins = %v, want 2 entries", got)
+	}
+
+	// A row predating the column (empty mode) must not be treated as opted in.
+	legacy := base
+	legacy.UpgradeMode = ""
+	snap := svc.toSnapshot(legacy)
+	if snap.AllowsWebSocket() {
+		t.Error("a route with no stored upgrade mode was treated as WebSocket-enabled")
+	}
+}
+
+// The route timeout must keep applying to ordinary requests — the WebSocket
+// work changed where it is applied, not whether it exists.
+func TestSnapshotStillCarriesRequestTimeout(t *testing.T) {
+	svc := NewRouteService(fakeRouteRepository{}, 30*time.Second, time.Minute)
+	snap := svc.toSnapshot(domain.Route{
+		RouteKey:    "ws",
+		TimeoutMs:   1500,
+		UpgradeMode: domain.UpgradeModeWebSocket,
+		Backends:    []domain.Backend{{TargetKey: "a", URL: "http://127.0.0.1:1", Weight: 1, Enabled: true, Healthy: true}},
+	})
+	if snap.Timeout != 1500*time.Millisecond {
+		t.Errorf("Timeout = %v, want 1.5s", snap.Timeout)
 	}
 }

@@ -70,8 +70,15 @@ func main() {
 
 	authMgr := coreauth.NewManager(cfg.Auth.JWTSecret, "", 0)
 	routeRepo := repository.NewRouteRepository(db)
-	routeSvc := service.NewRouteService(routeRepo, cfg.Gateway.DefaultBackendTimeout)
-	gatewayApp := application.NewGatewayApplication(routeSvc, cfg.Gateway.RefreshInterval)
+	routeSvc := service.NewRouteService(routeRepo, cfg.Gateway.DefaultBackendTimeout, cfg.Gateway.WebSocket.DefaultIdleTimeout)
+	gatewayApp := application.NewGatewayApplication(routeSvc, cfg.Gateway.RefreshInterval, application.WebSocketOptions{
+		MaxConnections:        cfg.Gateway.WebSocket.MaxConnections,
+		MaxConnectionsPerIP:   cfg.Gateway.WebSocket.MaxConnectionsPerIP,
+		HandshakeRate:         cfg.Gateway.WebSocket.HandshakeRate,
+		HandshakeBurst:        cfg.Gateway.WebSocket.HandshakeBurst,
+		DialTimeout:           cfg.Gateway.WebSocket.DialTimeout,
+		ResponseHeaderTimeout: cfg.Gateway.WebSocket.ResponseHeaderTimeout,
+	})
 	if err := gatewayApp.Start(ctx); err != nil {
 		alog.L().Error("start gateway app failed", zap.Error(err))
 		os.Exit(1)

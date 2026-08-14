@@ -11,7 +11,7 @@ export function MachinesListPage() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
-  const [revealToken, setRevealToken] = useState<string | null>(null)
+  const [agentCredentials, setAgentCredentials] = useState<{ machineId: number; token: string } | null>(null)
   const [form] = Form.useForm<CreateMachineRequest>()
   const mode = Form.useWatch('mode', form)
 
@@ -24,7 +24,7 @@ export function MachinesListPage() {
       queryClient.invalidateQueries({ queryKey: ['machines'] })
       setModalOpen(false)
       form.resetFields()
-      if (res.agent_token) setRevealToken(res.agent_token)
+      if (res.agent_token) setAgentCredentials({ machineId: res.machine.id, token: res.agent_token })
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
@@ -45,9 +45,9 @@ export function MachinesListPage() {
 
   const rotateMutation = useMutation({
     mutationFn: (id: number) => api.rotateMachineToken(id),
-    onSuccess: (res) => {
+    onSuccess: (res, machineId) => {
       queryClient.invalidateQueries({ queryKey: ['machines'] })
-      setRevealToken(res.agent_token)
+      setAgentCredentials({ machineId, token: res.agent_token })
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
@@ -193,18 +193,23 @@ export function MachinesListPage() {
       </Modal>
 
       <Modal
-        title="Agent token"
-        open={revealToken !== null}
-        onOk={() => setRevealToken(null)}
-        onCancel={() => setRevealToken(null)}
+        title="Agent installation credentials"
+        open={agentCredentials !== null}
+        onOk={() => setAgentCredentials(null)}
+        onCancel={() => setAgentCredentials(null)}
         okText="Done"
         cancelButtonProps={{ style: { display: 'none' } }}
       >
         <Typography.Paragraph>
-          Shown once — copy it now. Paste it into this machine&apos;s <code>agenda-node.yaml</code> as <code>token</code> (alongside its <code>machine_id</code>), then start agenda-node.
+          Run <code>install-node.sh</code> on the target machine and enter these values when prompted. The token is shown only once.
         </Typography.Paragraph>
-        <Typography.Paragraph code copyable={{ text: revealToken ?? '' }} className="agenda-mono">
-          {revealToken}
+        <Typography.Text type="secondary">Machine ID</Typography.Text>
+        <Typography.Paragraph code copyable={{ text: String(agentCredentials?.machineId ?? '') }} className="agenda-mono">
+          {agentCredentials?.machineId}
+        </Typography.Paragraph>
+        <Typography.Text type="secondary">Agent token</Typography.Text>
+        <Typography.Paragraph code copyable={{ text: agentCredentials?.token ?? '' }} className="agenda-mono">
+          {agentCredentials?.token}
         </Typography.Paragraph>
       </Modal>
     </div>

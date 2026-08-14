@@ -17,7 +17,7 @@ import (
 
 func newTestApp(t *testing.T, backendURL string, routeKey, instanceName string) *GatewayApplication {
 	t.Helper()
-	app := NewGatewayApplication(nil, time.Second)
+	app := NewGatewayApplication(nil, time.Second, WebSocketOptions{})
 	app.snapshots = []service.RouteSnapshot{
 		{
 			RouteKey:    routeKey,

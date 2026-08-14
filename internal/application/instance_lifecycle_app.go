@@ -141,6 +141,65 @@ func (a *InstanceLifecycleApplication) Decommission(ctx context.Context, appID, 
 	return log, nil
 }
 
+// ErrInstanceNotStopped is returned by DeleteInstance when the instance has not
+// been decommissioned first. Callers map it to 409 Conflict.
+var ErrInstanceNotStopped = errors.New("instance must be decommissioned before it can be deleted")
+
+// DeleteInstance permanently removes a decommissioned instance's record.
+//
+// Decommission is reversible — it stops the containers and drains traffic but
+// keeps the record, so a later deploy brings the instance back. Delete is the
+// terminal step, and it exists because without it a decommissioned instance is
+// unremovable through the UI: instances are otherwise only deleted implicitly,
+// by omitting them from a full application save, and that save re-validates
+// every OTHER instance in the payload first. One instance pointing at a machine
+// that has since been deleted is therefore enough to make the whole application
+// unsavable, with no way out.
+//
+// Requiring DesiredState=stopped is the safety property. Deleting a running
+// instance's record would orphan its containers (nothing left to name them) and
+// strand the gateway backends pointing at it; decommission is what removes both
+// before the record goes away.
+//
+// It takes the same per-instance deploy lock a deploy and a decommission take,
+// so the record cannot vanish underneath a teardown that is still running or a
+// deploy that is bringing the instance back.
+//
+// Caveat worth surfacing in the UI, not enforceable here: if the decommission's
+// container teardown never completed (the machine was offline), the background
+// reconcile that finishes it keys off this very record — see
+// ListStoppedByMachine. Deleting the record therefore abandons that cleanup and
+// the containers must be removed by hand.
+func (a *InstanceLifecycleApplication) DeleteInstance(ctx context.Context, appID, targetID int64) error {
+	logger.L().Info("lifecycle: delete instance requested", zap.Int64("application_id", appID), zap.Int64("target_id", targetID))
+	target, err := a.appSvc.GetTargetByID(ctx, appID, targetID)
+	if err != nil {
+		return err
+	}
+	if !target.Stopped() {
+		return ErrInstanceNotStopped
+	}
+
+	lockKey := service.ReleaseLockKey(appID, string(target.Env), target.InstanceName)
+	token, err := a.lockSvc.AcquireKey(ctx, lockKey, a.lockTTL())
+	if err != nil {
+		return err
+	}
+	defer a.lockSvc.ReleaseKey(ctx, lockKey, token)
+
+	// Re-read under the lock: a deploy that finished between the check above and
+	// the lock being granted has already flipped this instance back to running,
+	// and its containers are live again.
+	target, err = a.appSvc.GetTargetByID(ctx, appID, targetID)
+	if err != nil {
+		return err
+	}
+	if !target.Stopped() {
+		return ErrInstanceNotStopped
+	}
+	return a.appSvc.DeleteInstance(ctx, appID, targetID)
+}
+
 // There is deliberately no Recommission action. Bringing a decommissioned
 // instance back online is just a normal deploy of it: the deploy restarts the
 // containers and ReleaseApplication flips DesiredState back to running on

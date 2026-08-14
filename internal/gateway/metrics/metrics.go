@@ -37,10 +37,67 @@ var (
 		},
 		[]string{"route_key", "service_name", "env", "method", "endpoint"},
 	)
+
+	// WebSocket tunnels get their own instruments rather than riding on the
+	// HTTP ones. Two reasons: a tunnel's duration is minutes-to-hours, so it
+	// would land in the +Inf bucket of RequestDuration (whose buckets top out
+	// at 10s) and destroy that route's latency percentiles; and an HTTP metric
+	// is only observable once the request ends, which for a tunnel means the
+	// dashboard learns about a connection hours after it opened.
+	//
+	// WebsocketHandshakes is therefore incremented at handshake time, and
+	// WebsocketConnections is a gauge you can read right now.
+
+	// result is one of: success, not_enabled, unsupported_protocol,
+	// origin_rejected, backend_refused, draining, total_limit, route_limit,
+	// client_limit.
+	WebsocketHandshakes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gateway_websocket_handshakes_total",
+			Help: "WebSocket handshakes seen by the gateway, by outcome.",
+		},
+		[]string{"route_key", "service_name", "env", "backend", "result"},
+	)
+
+	WebsocketConnections = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gateway_websocket_connections_active",
+			Help: "WebSocket tunnels currently established through the gateway.",
+		},
+		[]string{"route_key", "service_name", "env", "backend"},
+	)
+
+	// Buckets span seconds to ~9 hours: a connection that dies in under a
+	// minute and one that lives all day are different failure stories, and the
+	// default HTTP buckets can tell neither.
+	WebsocketConnectionDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "gateway_websocket_connection_duration_seconds",
+			Help:    "Lifetime of established WebSocket tunnels.",
+			Buckets: []float64{1, 5, 15, 60, 300, 900, 1800, 3600, 7200, 21600, 32400},
+		},
+		[]string{"route_key", "service_name", "env"},
+	)
+
+	// reason is one of: peer_closed, idle_timeout, drain.
+	WebsocketDisconnects = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gateway_websocket_disconnects_total",
+			Help: "Established WebSocket tunnels that ended, by reason.",
+		},
+		[]string{"route_key", "service_name", "env", "reason"},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(RequestsTotal, RequestDuration)
+	prometheus.MustRegister(
+		RequestsTotal,
+		RequestDuration,
+		WebsocketHandshakes,
+		WebsocketConnections,
+		WebsocketConnectionDuration,
+		WebsocketDisconnects,
+	)
 }
 
 // StatusClass buckets an HTTP status code into "2xx".."5xx" (or "xxx" for an

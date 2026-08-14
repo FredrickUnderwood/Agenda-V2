@@ -22,17 +22,29 @@ type RouteRepository interface {
 }
 
 type RouteService struct {
-	routes           RouteRepository
-	defaultTimeoutMs int
+	routes                 RouteRepository
+	defaultTimeoutMs       int
+	defaultWSIdleTimeoutMs int
 }
 
-func NewRouteService(routes RouteRepository, defaultTimeout time.Duration) *RouteService {
+func NewRouteService(routes RouteRepository, defaultTimeout, defaultWSIdleTimeout time.Duration) *RouteService {
 	timeoutMs := int(defaultTimeout / time.Millisecond)
 	if timeoutMs <= 0 {
 		timeoutMs = 30000
 	}
-	return &RouteService{routes: routes, defaultTimeoutMs: timeoutMs}
+	wsIdleMs := int(defaultWSIdleTimeout / time.Millisecond)
+	if wsIdleMs <= 0 {
+		wsIdleMs = int(DefaultWebsocketIdleTimeout / time.Millisecond)
+	}
+	return &RouteService{routes: routes, defaultTimeoutMs: timeoutMs, defaultWSIdleTimeoutMs: wsIdleMs}
 }
+
+// DefaultWebsocketIdleTimeout is the fallback tunnel idle timeout when neither
+// the route nor the gateway config sets one. It is long enough not to fight a
+// typical 30s application-level Ping, and short enough that a tunnel whose peer
+// vanished without a FIN (NAT rebinding, hard power-off) is eventually reaped
+// instead of pinning a connection slot forever.
+const DefaultWebsocketIdleTimeout = 5 * time.Minute
 
 type RollbackRouteRequest struct {
 	Operator string `json:"operator"`
@@ -51,7 +63,18 @@ type RouteSnapshot struct {
 	InstanceSelectMode domain.InstanceSelectMode
 	InstanceHeader     string
 	Timeout            time.Duration
-	Backends           []BackendSnapshot
+	UpgradeMode        domain.UpgradeMode
+	// WebsocketIdleTimeout is already resolved against the gateway default;
+	// zero means "no idle timeout" (the route asked for it explicitly).
+	WebsocketIdleTimeout    time.Duration
+	WebsocketMaxConnections int
+	WebsocketAllowedOrigins []string
+	Backends                []BackendSnapshot
+}
+
+// AllowsWebSocket reports whether this route may be upgraded to a WebSocket.
+func (r RouteSnapshot) AllowsWebSocket() bool {
+	return r.UpgradeMode == domain.UpgradeModeWebSocket
 }
 
 type BackendSnapshot struct {
@@ -173,6 +196,16 @@ func (s *RouteService) normalizeUpsertRequest(req contract.UpsertRouteRequest) (
 	if instanceHeader == "" {
 		instanceHeader = domain.DefaultInstanceHeader
 	}
+	upgradeMode := domain.UpgradeMode(strings.TrimSpace(req.UpgradeMode))
+	if upgradeMode == "" {
+		upgradeMode = domain.UpgradeModeNone
+	}
+	if !domain.ValidUpgradeMode(upgradeMode) {
+		return domain.Route{}, nil, domain.NewInvalidParamError("upgrade_mode must be none or websocket")
+	}
+	if req.WebsocketMaxConnections < 0 {
+		return domain.Route{}, nil, domain.NewInvalidParamError("websocket_max_connections must be >= 0")
+	}
 	pathPrefix := normalizePathPrefix(req.PathPrefix)
 	timeoutMs := req.TimeoutMs
 	if timeoutMs <= 0 {
@@ -191,6 +224,11 @@ func (s *RouteService) normalizeUpsertRequest(req contract.UpsertRouteRequest) (
 		InstanceSelectMode: instanceSelectMode,
 		InstanceHeader:     instanceHeader,
 		TimeoutMs:          timeoutMs,
+
+		UpgradeMode:             upgradeMode,
+		WebsocketIdleTimeoutMs:  req.WebsocketIdleTimeoutMs,
+		WebsocketMaxConnections: req.WebsocketMaxConnections,
+		WebsocketAllowedOrigins: normalizeOriginList(req.WebsocketAllowedOrigins),
 	}
 	backends := make([]domain.Backend, 0, len(req.Backends))
 	for _, item := range req.Backends {
@@ -208,6 +246,13 @@ func (s *RouteService) toSnapshot(route domain.Route) RouteSnapshot {
 	if timeout <= 0 {
 		timeout = time.Duration(s.defaultTimeoutMs) * time.Millisecond
 	}
+	upgradeMode := route.UpgradeMode
+	if !domain.ValidUpgradeMode(upgradeMode) {
+		// A row written before this column existed (or hand-edited) reads as
+		// "no upgrades", never as "allow" — failing closed here means a route
+		// can only carry WebSockets after someone explicitly opted it in.
+		upgradeMode = domain.UpgradeModeNone
+	}
 	snapshot := RouteSnapshot{
 		RouteKey:           route.RouteKey,
 		ApplicationID:      route.ApplicationID,
@@ -220,6 +265,11 @@ func (s *RouteService) toSnapshot(route domain.Route) RouteSnapshot {
 		InstanceSelectMode: route.InstanceSelectMode,
 		InstanceHeader:     route.InstanceHeader,
 		Timeout:            timeout,
+
+		UpgradeMode:             upgradeMode,
+		WebsocketIdleTimeout:    s.resolveWSIdleTimeout(route.WebsocketIdleTimeoutMs),
+		WebsocketMaxConnections: route.WebsocketMaxConnections,
+		WebsocketAllowedOrigins: splitOriginList(route.WebsocketAllowedOrigins),
 	}
 	for _, backend := range route.Backends {
 		if !backend.Enabled || !backend.Healthy {
@@ -241,6 +291,51 @@ func (s *RouteService) toSnapshot(route domain.Route) RouteSnapshot {
 		}
 	}
 	return snapshot
+}
+
+// resolveWSIdleTimeout maps the stored per-route value onto a real duration:
+// 0 takes the gateway default, negative means the route explicitly wants no
+// idle timeout (returned as 0, which the proxy reads as "never expire").
+func (s *RouteService) resolveWSIdleTimeout(idleMs int) time.Duration {
+	switch {
+	case idleMs > 0:
+		return time.Duration(idleMs) * time.Millisecond
+	case idleMs < 0:
+		return 0
+	default:
+		return time.Duration(s.defaultWSIdleTimeoutMs) * time.Millisecond
+	}
+}
+
+// normalizeOriginList canonicalizes an operator-typed Origin allowlist for
+// storage: lowercased, whitespace/comma separated, deduped. Stored as a single
+// column rather than a child table — it is a short, route-local list edited
+// together with the route.
+func normalizeOriginList(raw string) string {
+	return strings.Join(splitOriginList(raw), ",")
+}
+
+func splitOriginList(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
+	out := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		f = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(f, "/")))
+		if f == "" {
+			continue
+		}
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		out = append(out, f)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeBackend(req contract.BackendEntry) (domain.Backend, error) {

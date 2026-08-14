@@ -18,7 +18,7 @@ func TestRoutedPath(t *testing.T) {
 }
 
 func TestMatchLongestPath(t *testing.T) {
-	app := NewGatewayApplication(nil, time.Second)
+	app := NewGatewayApplication(nil, time.Second, WebSocketOptions{})
 	app.snapshots = []service.RouteSnapshot{
 		{
 			RouteKey:   "pay",
@@ -46,7 +46,7 @@ func TestMatchLongestPath(t *testing.T) {
 }
 
 func TestMatchSpecificHostBeforeWildcard(t *testing.T) {
-	app := NewGatewayApplication(nil, time.Second)
+	app := NewGatewayApplication(nil, time.Second, WebSocketOptions{})
 	app.snapshots = []service.RouteSnapshot{
 		{
 			RouteKey:   "specific",
@@ -74,7 +74,7 @@ func TestMatchSpecificHostBeforeWildcard(t *testing.T) {
 }
 
 func TestMatchPinnedInstance(t *testing.T) {
-	app := NewGatewayApplication(nil, time.Second)
+	app := NewGatewayApplication(nil, time.Second, WebSocketOptions{})
 	app.snapshots = []service.RouteSnapshot{
 		{
 			RouteKey:           "pay",

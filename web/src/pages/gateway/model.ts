@@ -4,6 +4,7 @@ import type {
   ApplicationGatewayRoute,
   Environment,
   GatewayBackendMode,
+  GatewayUpgradeMode,
 } from '@/api/types'
 import { color } from '@/theme/tokens'
 
@@ -34,6 +35,9 @@ export interface GwRoute {
   pathPrefix: string
   enabled: boolean
   backendMode: GatewayBackendMode
+  // 'websocket' routes carry long-lived connections, which changes how a
+  // deploy or decommission affects their clients — worth seeing on the map.
+  upgradeMode: GatewayUpgradeMode
   hostId: string // host || '*'
   serviceId: string // `${appId}:${env}`
   instances: GwInstance[] // resolved backends this route hits
@@ -139,6 +143,7 @@ export function buildGatewayModel(entries: AppInstances[]): GatewayModel {
           pathPrefix: r.path_prefix,
           enabled: r.enabled,
           backendMode: r.backend_mode,
+          upgradeMode: r.upgrade_mode ?? 'none',
           hostId,
           serviceId,
           instances: resolveRouteInstances(r, instances),

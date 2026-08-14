@@ -41,6 +41,8 @@
 - **内置网关**（`agenda-gateway`）——按 host/path 动态路由，后端可加权、按健康状态门控，
   提供接口级指标（QPS / 错误率 / 延迟分位），并**内置边缘 TLS**(ACME DNS-01,无需另起
   Caddy/nginx)。见 [doc/gateway-edge-tls.md](doc/gateway-edge-tls.md)。
+  **WebSocket** 按路由开关(默认关闭),带空闲超时、连接数上限、Origin 白名单、独立指标,
+  以及重启和实例下线时的连接优雅排空。见 [doc/gateway-websocket.md](doc/gateway-websocket.md)。
 - **可观测性**——实例级日志 tail、Prometheus 指标、以及反代在控制台下的 Grafana 仪表盘。
   应用通过 SDK 暴露自定义指标；控制面经 node 中转抓取(无需直连应用端口)。
 - **告警**——自建 PromQL `AlertRule` 规则引擎，外加通过 SDK 发往
@@ -125,7 +127,18 @@ MySQL + Redis + 三个二进制 + Web 控制台,并在首次运行时生成所�
 
 首次运行生成的管理员用户名/密码会在 `up` 结束时打印。这是单机开发/预发的快速上手,
 不是生产拓扑指南——真正多机部署时,在每台目标机器上分别装 `agenda-node`,再通过 Web
-控制台添加机器。
+控制台添加机器。远程节点可以先在控制台创建 Agent Machine 并复制 ID/token，然后在目标
+机器运行交互式安装器：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FredrickUnderwood/Agenda-V2/master/install-node.sh -o install-node.sh
+sudo bash install-node.sh
+```
+
+安装器会校验 ID/token/Central API，创建持久化配置和 workspace，并通过 Docker Compose
+直接启动节点。再次运行会自动复用已有配置并更新、重建容器，不需要重新填写；只有使用
+`--reconfigure` 才会重新采集并替换配置。详细说明见
+[`cmd/agenda-node/README.md`](cmd/agenda-node/README.md)。
 
 ## 部署你自己的应用
 
