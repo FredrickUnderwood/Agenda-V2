@@ -164,6 +164,24 @@ export interface ApplicationEnvTargetRequest {
   gateway_routes?: ApplicationGatewayRouteRequest[]
 }
 
+// EnvVarMatrix is one application's env vars for every environment. The
+// backend always returns an entry per environment (empty object when nothing is
+// configured), so the console can render a Key x (prod, stage, test) matrix
+// without inferring which environments exist.
+export type EnvVarMatrix = Record<Environment, Record<string, string>>
+
+export interface ApplicationEnvironments {
+  application_id: number
+  envs: EnvVarMatrix
+}
+
+// Environments omitted from `envs` are left untouched; an environment present
+// with an empty object has its vars cleared. There is no inheritance between
+// environments: a blank value is stored as an empty string.
+export interface UpdateApplicationEnvironmentsRequest {
+  envs: Partial<EnvVarMatrix>
+}
+
 export interface Machine {
   id: number
   name: string

@@ -1,6 +1,7 @@
 import { apiClient } from './client'
 import type {
   Application,
+  ApplicationEnvironments,
   ApplicationEnvTarget,
   ApplicationInstanceHealth,
   CreateApplicationRequest,
@@ -8,6 +9,7 @@ import type {
   Environment,
   ListResponse,
   NodeLogsResponse,
+  UpdateApplicationEnvironmentsRequest,
   UpdateApplicationRequest,
 } from './types'
 
@@ -72,4 +74,14 @@ export function decommissionInstance(appId: number, targetId: number) {
 // been decommissioned first — see the backend's DeleteInstance for why.
 export function deleteInstance(appId: number, targetId: number) {
   return apiClient.delete<void>(`/applications/${appId}/instances/${targetId}`).then((r) => r.data)
+}
+
+// Env vars are stored per environment. Both calls cover all environments in one
+// request so the matrix editor never renders (or saves) a partial picture.
+export function getApplicationEnvironments(appId: number) {
+  return apiClient.get<ApplicationEnvironments>(`/applications/${appId}/environments`).then((r) => r.data)
+}
+
+export function updateApplicationEnvironments(appId: number, req: UpdateApplicationEnvironmentsRequest) {
+  return apiClient.put<ApplicationEnvironments>(`/applications/${appId}/environments`, req).then((r) => r.data)
 }

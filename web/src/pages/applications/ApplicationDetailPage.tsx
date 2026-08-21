@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import * as api from '@/api/applications'
 import { color } from '@/theme/tokens'
 import { errorMessage } from '@/utils/errorMessage'
+import { EnvVarsTab } from './EnvVarsTab'
 import { InstancesTab } from './InstancesTab'
 import { MonitoringTab } from './MonitoringTab'
 import { OverviewTab } from './OverviewTab'
@@ -73,6 +74,7 @@ export function ApplicationDetailPage() {
           { key: 'routes', label: 'Routes', children: <RoutesTab appId={id} /> },
           { key: 'releases', label: 'Deployments', children: <ReleasesTab appId={id} /> },
           { key: 'monitoring', label: 'Monitoring', children: <MonitoringTab serviceName={app.name} /> },
+          { key: 'env-vars', label: 'Env vars', children: <EnvVarsTab appId={id} /> },
           { key: 'overview', label: 'Settings', children: <OverviewTab app={app} /> },
         ]}
       />

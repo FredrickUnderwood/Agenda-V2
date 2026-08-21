@@ -69,9 +69,16 @@ It also passes shell env vars to `docker compose up` for compose interpolation:
 user-defined env vars starting with `AGENDA_` are **discarded** by the platform (to
 stop you breaking the SDK contract). Use a different prefix for your business env.
 
-User-defined env merges in three layers (later overrides earlier): app-level
-`DeployConfig.env` < env-level `ApplicationEnvironment.EnvVars` < instance-level
-`ApplicationEnvTarget.EnvOverride`.
+User-defined env vars are configured **per environment**, in the console's
+**Env vars** tab on the application page: one row per variable, one column per
+environment (Prod / Stage / Test). A blank cell deploys as an empty value —
+environments do not inherit from each other. Changes take effect on the next
+deploy, not on save.
+
+Under the hood they merge in three layers (later overrides earlier): the legacy
+app-level `DeployConfig.env` baseline (no longer editable in the UI; migrated
+into Prod on upgrade) < env-level `ApplicationEnvironment.EnvVars` (what the tab
+writes) < instance-level `ApplicationEnvTarget.EnvOverride` (API only).
 
 ## 2. Gin backend skeleton (main.go)
 

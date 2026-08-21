@@ -71,6 +71,17 @@ func main() {
 	notificationRepo := repository.NewNotificationRepository(db)
 	alertRuleRepo := repository.NewAlertRuleRepository(db)
 
+	// One-time data migration: env vars used to live on the application as a
+	// single all-environments baseline; they are now per-environment. Move any
+	// remaining baseline into the prod environment. Idempotent — a no-op once
+	// every application has been migrated.
+	// A failure here is not fatal: each application is migrated atomically
+	// (prod row written before the baseline is cleared), unmigrated ones keep
+	// deploying off the baseline layer, and the next restart retries.
+	if _, err := service.BackfillApplicationEnvVars(context.Background(), appRepo, appEnvironmentRepo, appTargetRepo); err != nil {
+		logger.L().Warn("failed to backfill application env vars; will retry on next start", zap.Error(err))
+	}
+
 	// Service
 	secretBox := secret.NewBox(cfg.Security.MasterKey)
 

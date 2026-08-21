@@ -1,6 +1,11 @@
 package domain
 
-import "github.com/bytedance/sonic"
+import (
+	"regexp"
+	"strings"
+
+	"github.com/bytedance/sonic"
+)
 
 // parseEnvMap nil-safe-decodes a JSON-encoded map[string]string column.
 // Shared by ApplicationEnvironment.ParseEnvVars and
@@ -16,4 +21,22 @@ func parseEnvMap(raw string) (map[string]string, error) {
 		return nil, err
 	}
 	return vars, nil
+}
+
+// ReservedEnvVarPrefix is the namespace the platform injects into every
+// container (AGENDA_APP_NAME, AGENDA_LOG_DIR, ...). User-defined vars in this
+// namespace are dropped at deploy time by pipeline.buildOverrideYAML so a
+// misconfigured app can't break the SDK contract; validation rejects them up
+// front so the operator sees why instead of losing them silently.
+const ReservedEnvVarPrefix = "AGENDA_"
+
+var envVarKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ValidEnvVarKey reports whether k is a usable container env var name. Empty
+// keys and the reserved AGENDA_ namespace are rejected.
+func ValidEnvVarKey(k string) bool {
+	if strings.HasPrefix(k, ReservedEnvVarPrefix) {
+		return false
+	}
+	return envVarKeyPattern.MatchString(k)
 }

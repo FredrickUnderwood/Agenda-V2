@@ -85,7 +85,7 @@ export function OverviewTab({ app }: { app: Application }) {
     },
     {
       key: 'deploy',
-      label: sectionLabel('Deploy config', method === 'api' ? 'Webhook request sent on deploy' : 'Compose file, services, env vars'),
+      label: sectionLabel('Deploy config', method === 'api' ? 'Webhook request sent on deploy' : 'Compose file, services, pre-commands'),
       forceRender: true,
       children: <DeployConfigFields method={method} />,
     },

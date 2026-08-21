@@ -65,3 +65,17 @@ func (r *ApplicationEnvironmentRepository) Upsert(ctx context.Context, row *doma
 	}
 	return nil
 }
+
+// ListByApplication returns every configured env-level row for one
+// application. Environments with nothing configured simply have no row —
+// callers fill the gaps rather than expecting one row per environment.
+func (r *ApplicationEnvironmentRepository) ListByApplication(ctx context.Context, appID int64) ([]*domain.ApplicationEnvironment, error) {
+	var rows []*domain.ApplicationEnvironment
+	if err := r.db.WithContext(ctx).
+		Where("application_id = ?", appID).
+		Find(&rows).Error; err != nil {
+		logger.L().Error("failed to list application environments", zap.Int64("application_id", appID), zap.Error(err))
+		return nil, err
+	}
+	return rows, nil
+}
