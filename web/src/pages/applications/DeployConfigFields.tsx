@@ -85,9 +85,6 @@ function DockerFields() {
       <Form.Item label="Pre-commands" extra="Shell commands run in the working directory before compose up.">
         <StringList name={['docker', 'pre_commands']} placeholder="npm ci && npm run build" addLabel="Add command" />
       </Form.Item>
-      <Form.Item label="Environment variables" extra="Application-level baseline, overridden per environment and per instance.">
-        <KeyValueList name={['docker', 'env']} keyPlaceholder="KEY" valuePlaceholder="value" addLabel="Add variable" />
-      </Form.Item>
     </>
   )
 }

@@ -24,7 +24,6 @@ export interface DockerConfigForm {
   services?: string[]
   pull_before_deploy?: boolean
   pre_commands?: string[]
-  env?: KV[]
   health_check: DockerHealthCheckForm
 }
 
@@ -86,7 +85,6 @@ export function parseDeployConfig(json: string, method: DeployMethod): DeployCon
       services: strList(c.services),
       pull_before_deploy: c.pull_before_deploy === true,
       pre_commands: strList(c.pre_commands),
-      env: method === 'docker' ? mapToKV(c.env) : [],
       health_check: {
         // Backend treats absent/null enabled as true (see composeHealthCheckEnabled).
         enabled: hc.enabled !== false,
@@ -132,8 +130,10 @@ export function buildDeployConfig(form: DeployConfigForm, method: DeployMethod):
   cfg.pull_before_deploy = !!d.pull_before_deploy
   const preCommands = (d.pre_commands ?? []).map((s) => s ?? '').filter((s) => s.trim())
   if (preCommands.length) cfg.pre_commands = preCommands
-  const env = kvToMap(d.env)
-  if (Object.keys(env).length) cfg.env = env
+  // No `env` key is emitted: env vars are per-environment now (see EnvVarsTab
+  // and the prod backfill in service.BackfillApplicationEnvVars), so the legacy
+  // application-level baseline is not editable here and saving drops any
+  // leftover the backfill hasn't reached yet.
 
   const hc = d.health_check
   const health: Record<string, unknown> = { enabled: hc.enabled }

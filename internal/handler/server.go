@@ -134,6 +134,8 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:appID/instances/:targetID/logs", s.getApplicationInstanceLogs)
 		apps.POST("/:appID/instances/:targetID/decommission", s.decommissionInstance)
 		apps.DELETE("/:appID/instances/:targetID", s.deleteInstance)
+		apps.GET("/:appID/environments", s.getApplicationEnvironments)
+		apps.PUT("/:appID/environments", s.updateApplicationEnvironments)
 		apps.GET("/:appID/environments/:env", s.getApplicationEnvironment)
 		apps.PUT("/:appID/environments/:env", s.updateApplicationEnvironment)
 		apps.GET("/:appID/releases", s.listReleases)
