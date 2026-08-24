@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import { Alert, Button, Select, Space, Tooltip, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
-import { DEFAULT_TIME_RANGE_FROM, getGrafanaBaseUrl, panelEmbedUrl, TIME_RANGE_OPTIONS } from '@/utils/grafana'
+import {
+  DEFAULT_ENV_FILTER,
+  DEFAULT_TIME_RANGE_FROM,
+  ENV_FILTER_OPTIONS,
+  getGrafanaBaseUrl,
+  panelEmbedUrl,
+  TIME_RANGE_OPTIONS,
+} from '@/utils/grafana'
 
 // panelId → title, matching deploy/observability/grafana/dashboards/gateway-overview.json.
 // 1/2 are route-level; 3/4/5 are per-endpoint (normalized app-relative path).
@@ -35,12 +42,13 @@ const APP_ROUTE_LATENCY_PANELS = [
   { id: 12, title: 'P99 latency by app route' },
 ] as const
 
-function Panel({ baseUrl, id, title, from, serviceName, full }: {
+function Panel({ baseUrl, id, title, from, serviceName, env, full }: {
   baseUrl: string
   id: number
   title: string
   from: string
   serviceName: string
+  env: string
   full?: boolean
 }) {
   return (
@@ -50,7 +58,7 @@ function Panel({ baseUrl, id, title, from, serviceName, full }: {
       </Typography.Text>
       <iframe
         title={title}
-        src={panelEmbedUrl(baseUrl, id, from, serviceName)}
+        src={panelEmbedUrl(baseUrl, id, from, serviceName, env)}
         style={{ width: '100%', height: 280, border: '1px solid #E4E0D6', borderRadius: 8 }}
       />
     </div>
@@ -60,9 +68,11 @@ function Panel({ baseUrl, id, title, from, serviceName, full }: {
 export function MonitoringTab({ serviceName }: { serviceName: string }) {
   const baseUrl = getGrafanaBaseUrl()
   const [from, setFrom] = useState<string>(DEFAULT_TIME_RANGE_FROM)
+  const [env, setEnv] = useState<string>(DEFAULT_ENV_FILTER)
   // Bumping the nonce remounts every iframe, forcing Grafana to re-render the
   // panels — the tab has no react-query data of its own to refetch.
   const [nonce, setNonce] = useState(0)
+  const envLabel = ENV_FILTER_OPTIONS.find((o) => o.value === env)?.label ?? env
 
   return (
     <div>
@@ -73,13 +83,22 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
         title="Service dashboard"
         description={
           <>
-            These panels show only <strong className="agenda-mono">{serviceName}</strong>. Requires the observability
-            add-on (see <code className="agenda-mono">deploy/observability/README.md</code>) to be running.
+            These panels show only <strong className="agenda-mono">{serviceName}</strong> in{' '}
+            <strong className="agenda-mono">{envLabel}</strong>. Requires the observability add-on (see{' '}
+            <code className="agenda-mono">deploy/observability/README.md</code>) to be running.
           </>
         }
       />
 
       <Space style={{ marginBottom: 16 }}>
+        <Typography.Text type="secondary">Environment</Typography.Text>
+        <Select
+          size="small"
+          style={{ width: 120 }}
+          value={env}
+          onChange={setEnv}
+          options={ENV_FILTER_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
+        />
         <Typography.Text type="secondary">Time range</Typography.Text>
         <Select
           size="small"
@@ -96,19 +115,19 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
       <Typography.Title level={5} style={{ marginTop: 0 }}>By route</Typography.Title>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
         {ROUTE_PANELS.map((p) => (
-          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} env={env} />
         ))}
       </div>
 
       <Typography.Title level={5}>By endpoint</Typography.Title>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {ENDPOINT_RATE_PANELS.map((p) => (
-          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} env={env} />
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
         {ENDPOINT_LATENCY_PANELS.map((p) => (
-          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} env={env} />
         ))}
       </div>
 
@@ -119,12 +138,12 @@ export function MonitoringTab({ serviceName }: { serviceName: string }) {
       </Typography.Paragraph>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {APP_ROUTE_RATE_PANELS.map((p) => (
-          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} env={env} />
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
         {APP_ROUTE_LATENCY_PANELS.map((p) => (
-          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} />
+          <Panel key={`${p.id}-${nonce}`} baseUrl={baseUrl} id={p.id} title={p.title} from={from} serviceName={serviceName} env={env} />
         ))}
       </div>
     </div>

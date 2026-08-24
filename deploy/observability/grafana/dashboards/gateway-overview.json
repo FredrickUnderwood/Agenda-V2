@@ -26,7 +26,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "clamp_max(sum(rate(gateway_requests_total{service_name=~\"$service\", status_class=\"5xx\"}[5m])) by (service_name, route_key) / sum(rate(gateway_requests_total{service_name=~\"$service\"}[5m])) by (service_name, route_key), 1)",
+          "expr": "clamp_max(sum(rate(gateway_requests_total{service_name=~\"$service\", env=~\"$env\", status_class=\"5xx\"}[5m])) by (service_name, route_key) / sum(rate(gateway_requests_total{service_name=~\"$service\", env=~\"$env\"}[5m])) by (service_name, route_key), 1)",
           "legendFormat": "{{route_key}}",
           "refId": "A"
         }
@@ -52,7 +52,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\"}[5m])) by (le, service_name, route_key))",
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", env=~\"$env\"}[5m])) by (le, service_name, route_key))",
           "legendFormat": "{{route_key}}",
           "refId": "A"
         }
@@ -78,7 +78,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\"}[1m])) by (endpoint)",
+          "expr": "sum(rate(gateway_requests_total{service_name=~\"$service\", env=~\"$env\", endpoint=~\"$endpoint\"}[1m])) by (endpoint)",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -106,7 +106,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "clamp_max(sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\", status_class=\"5xx\"}[5m])) by (endpoint) / sum(rate(gateway_requests_total{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (endpoint), 1)",
+          "expr": "clamp_max(sum(rate(gateway_requests_total{service_name=~\"$service\", env=~\"$env\", endpoint=~\"$endpoint\", status_class=\"5xx\"}[5m])) by (endpoint) / sum(rate(gateway_requests_total{service_name=~\"$service\", env=~\"$env\", endpoint=~\"$endpoint\"}[5m])) by (endpoint), 1)",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -132,7 +132,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
+          "expr": "histogram_quantile(0.50, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", env=~\"$env\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -158,7 +158,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", env=~\"$env\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -184,7 +184,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
+          "expr": "histogram_quantile(0.99, sum(rate(gateway_request_duration_seconds_bucket{service_name=~\"$service\", env=~\"$env\", endpoint=~\"$endpoint\"}[5m])) by (le, endpoint))",
           "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
@@ -210,7 +210,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(http_requests_total{app=~\"$service\"}[1m])) by (route)",
+          "expr": "sum(rate(http_requests_total{app=~\"$service\", env=~\"$env\"}[1m])) by (route)",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -238,7 +238,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "clamp_max(sum(rate(http_requests_total{app=~\"$service\", status=~\"5..\"}[5m])) by (route) / sum(rate(http_requests_total{app=~\"$service\"}[5m])) by (route), 1)",
+          "expr": "clamp_max(sum(rate(http_requests_total{app=~\"$service\", env=~\"$env\", status=~\"5..\"}[5m])) by (route) / sum(rate(http_requests_total{app=~\"$service\", env=~\"$env\"}[5m])) by (route), 1)",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -264,7 +264,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\", env=~\"$env\"}[5m])) by (le, route))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -290,7 +290,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\", env=~\"$env\"}[5m])) by (le, route))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -316,7 +316,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\"}[5m])) by (le, route))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{app=~\"$service\", env=~\"$env\"}[5m])) by (le, route))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -340,6 +340,15 @@
         "options": [{ "text": ".*", "value": ".*", "selected": true }]
       },
       {
+        "name": "env",
+        "type": "textbox",
+        "label": "Env",
+        "description": "env filter (prod/stage/test); injected as var-env by the console's Monitoring tab env picker. Defaults to .* (all envs) when opened directly.",
+        "query": ".*",
+        "current": { "text": ".*", "value": ".*" },
+        "options": [{ "text": ".*", "value": ".*", "selected": true }]
+      },
+      {
         "name": "endpoint",
         "type": "textbox",
         "label": "Endpoint",
@@ -355,5 +364,5 @@
   "timezone": "browser",
   "title": "Gateway Overview",
   "uid": "agenda-gateway-overview",
-  "version": 4
+  "version": 5
 }
