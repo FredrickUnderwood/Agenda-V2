@@ -205,6 +205,18 @@ services:
     # the platform's .agenda/compose.override.yml auto-injects env + mounts the log volume.
     # Business env (DB_DSN, downstream service addresses, etc.) is injected via the console's
     # three-layer env config; don't hard-code it.
+    #
+    # Optional, and ONLY needed if you plan to turn on deploy_config's
+    # health_check.require_healthy. Without a healthcheck: block the container's
+    # .State.Health is permanently "none", and require_healthy then fails every
+    # deploy (see §10). The test command must exist in your image — alpine ships
+    # busybox wget; distroless has neither wget nor curl.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
 ```
 
 Two topologies for Gin + React; **topology A recommended**:
@@ -488,9 +500,13 @@ dependency, pick option a.
 Walk through it in the console or via the API:
 
 1. **Create the Application**: name, repo_url, deploy_method=`docker`, deploy_config
-   (JSON: `work_dir` / `compose_file` / `services` / `env` / `health_check`).
+   (JSON: `work_dir` / `compose_file` / `services` / `env` / `health_check`). Here
+   `health_check` configures the **container-level** check the pipeline runs
+   (`enabled`, `require_healthy`, `timeout_seconds`, `interval_seconds`) — a
+   different thing from step 2's HTTP probe; see §10.
 2. **Create an environment instance target**: env (e.g. prod), instance_name,
-   machine_id, `port` (=APP_PORT), health check (default `GET /healthz` expecting 200),
+   machine_id, `port` (=APP_PORT), health check (default `GET /healthz` expecting 200 —
+   this is the **HTTP** probe, and what the Application page shows),
    and for monitoring `metrics_enabled` + `metrics_port`.
 3. **Configure routes** (Routes Tab): external binds a host, internal uses `/svc-<name>`
    + strip (see §4).
@@ -507,6 +523,16 @@ routes attach to one representative target, send `[]` for the rest).
 
 ## 10. Common traps (deploy / runtime)
 
+- **`compose_healthcheck` is NOT the instance health check — two independent
+  mechanisms**: the pipeline step only reads `docker inspect`'s `.State.Status` /
+  `.State.Health` (which comes from compose's `healthcheck:` or the Dockerfile's
+  `HEALTHCHECK`) and **issues no HTTP request at all**; the instance health check is the
+  control plane's HTTP `GET /healthz` probe every ~15s, and that is what the Application
+  page displays. With no `healthcheck:` declared, `.State.Health` is permanently `none` —
+  so turning on `health_check.require_healthy` (the UI switch labelled "Fail deploy if not
+  healthy") makes every deploy fail with `compose healthcheck failed: <service> has no
+  Docker healthcheck` while the Application page keeps showing healthy. Either leave
+  `require_healthy` off, or declare a `healthcheck:` in compose (see §3).
 - **Health gating is a deploy-time snapshot**: instance health / enabled changes aren't
   pushed to the gateway in real time; you must **redeploy** to trigger
   `gateway_routes_sync` for them to take effect.
