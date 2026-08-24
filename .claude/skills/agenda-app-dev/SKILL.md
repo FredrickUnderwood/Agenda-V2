@@ -382,7 +382,9 @@ name**, which in a multi-service app ≠ the app name.
 Reverse-proxied same-origin under the console's nginx at `/grafana` (the port isn't
 exposed): `http://<host>:8090/grafana/`. The console's **Monitoring Tab** embeds
 `/d-solo` panels; each app sees only its own curves (filtered by the dashboard
-`service` variable). No need to fill in a Grafana URL.
+`service` variable), for one environment at a time (the **Environment** picker next
+to the time range, dashboard `env` variable, default `prod` — pick "All envs" to
+sum them). No need to fill in a Grafana URL.
 
 ## 7. Custom instrumentation (business metrics)
 

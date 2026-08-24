@@ -31,7 +31,9 @@ way: Grafana is served under `/grafana` behind the web console's nginx
 so its port is **never published** and the console embeds panels same-origin at
 `/grafana/d-solo/...`. The Monitoring tab passes the app's service name as the
 dashboard's `service` template variable (`var-service`), so each app sees only
-its own series.
+its own series, plus the environment picked in its Environment selector as
+`var-env` (defaults to `prod`) — without it the panels sum prod, stage and test
+together, since every expr aggregates the `env` label away.
 
 For this **standalone add-on**, Grafana is published at the root (port 3000)
 for direct access. Don't expose that port to the internet — put it behind your
@@ -43,10 +45,12 @@ GF_SERVER_SERVE_FROM_SUB_PATH: "true"
 ```
 and embed:
 ```
-<your-origin>/grafana/d-solo/agenda-gateway-overview/gateway-overview?panelId=1&var-service=<svc>&theme=light&kiosk
+<your-origin>/grafana/d-solo/agenda-gateway-overview/gateway-overview?panelId=1&var-service=<svc>&var-env=prod&theme=light&kiosk
 ```
 `panelId=1` is the error-rate panel, `panelId=2` is P99 latency (see
-`grafana/dashboards/gateway-overview.json`).
+`grafana/dashboards/gateway-overview.json`). `var-env` takes one env
+(`prod`/`stage`/`test`) or `.*` for all of them; omitting it entirely leaves the
+dashboard default, which is `.*`.
 
 ## Metrics reference
 
