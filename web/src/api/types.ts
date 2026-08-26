@@ -410,3 +410,97 @@ export interface AlertRuleTestResult {
   result?: unknown
   error?: string
 }
+
+export type DatabaseEngine = 'mysql'
+
+// A registered database always lives on its machine — there is no host field.
+// agenda-node connects to it locally, so the port is never published.
+export interface DatabaseInstance {
+  id: number
+  name: string
+  engine: DatabaseEngine
+  machine_id: number
+  port: number
+  username: string
+  default_database: string
+  env: Environment
+  description: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateDatabaseInstanceRequest {
+  name: string
+  engine?: DatabaseEngine
+  machine_id: number
+  port: number
+  username: string
+  password?: string
+  default_database?: string
+  env?: Environment
+  description?: string
+  enabled?: boolean
+}
+
+export type UpdateDatabaseInstanceRequest = Partial<CreateDatabaseInstanceRequest>
+
+export interface DatabaseColumn {
+  name: string
+  type: string
+  // Set when the column held bytes that are not valid UTF-8; those cells are
+  // base64-encoded rather than shown raw.
+  binary: boolean
+}
+
+// A cell is null for SQL NULL, which is deliberately distinct from ''.
+export type DatabaseCell = string | null
+
+export interface QueryResult {
+  columns: DatabaseColumn[]
+  rows: DatabaseCell[][]
+  row_count: number
+  truncated: boolean
+  duration_ms: number
+  database: string
+  query_log_id: number
+}
+
+export interface QueryRequest {
+  database?: string
+  sql: string
+  max_rows?: number
+  timeout_ms?: number
+}
+
+export interface DBQueryLog {
+  id: number
+  instance_id: number
+  instance_name: string
+  env: Environment
+  user_id: number
+  username: string
+  database_name: string
+  statement: string
+  result_truncated: boolean
+  row_count: number
+  duration_ms: number
+  success: boolean
+  error: string
+  created_at: string
+}
+
+// Only a single-entry read carries the stored result; a listing never does.
+export interface DBQueryLogDetail extends DBQueryLog {
+  result?: {
+    columns: DatabaseColumn[]
+    rows: DatabaseCell[][]
+    truncated: boolean
+  }
+}
+
+export interface TestDatabaseInstanceResult {
+  ok: boolean
+  server_version?: string
+  error?: string
+}

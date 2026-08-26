@@ -8,6 +8,7 @@ import { MePage } from '@/pages/MePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { UsersPage } from '@/pages/admin/UsersPage'
 import { AlertRulesPage } from '@/pages/alerts/AlertRulesPage'
+import { DatabasesPage } from '@/pages/databases/DatabasesPage'
 import { ApplicationDetailPage } from '@/pages/applications/ApplicationDetailPage'
 import { ApplicationsListPage } from '@/pages/applications/ApplicationsListPage'
 import { InstanceLogsPage } from '@/pages/applications/InstanceLogsPage'
@@ -30,6 +31,7 @@ function App() {
                 <Route path="applications/:appId" element={<ApplicationDetailPage />} />
                 <Route path="applications/:appId/instances/:targetId/logs" element={<InstanceLogsPage />} />
                 <Route path="machines" element={<MachinesListPage />} />
+                <Route path="databases" element={<DatabasesPage />} />
                 <Route path="gateway" element={<GatewayPage />} />
                 <Route path="alert-rules" element={<AlertRulesPage />} />
                 <Route path="inbox" element={<InboxPage />} />
