@@ -199,7 +199,8 @@ func scanRows(rows *sql.Rows, maxRows, maxBytes int) (*contract.NodeDBQueryRespo
 		return nil, err
 	}
 
-	resp.Columns = cols
+	// cols is the same slice resp.Columns was built from, so the Binary flags
+	// set while scanning are already visible here.
 	resp.RowCount = len(resp.Rows)
 	return resp, nil
 }

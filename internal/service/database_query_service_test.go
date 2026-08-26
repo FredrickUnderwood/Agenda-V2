@@ -342,3 +342,16 @@ func TestQueryRefusedForMemberOnProdIsNotAudited(t *testing.T) {
 		t.Fatalf("%d audit entries written; a query that was never run should not be recorded as one", count)
 	}
 }
+
+func TestQueryOnAnUnknownInstanceIsNotFound(t *testing.T) {
+	_, querySvc, _, _ := newDatabaseTestServices(t, secret.NewBox(""))
+
+	_, err := querySvc.Query(context.Background(),
+		Principal{UserID: 1, IsAdmin: true}, 4242,
+		QueryRequest{SQL: "SELECT 1"})
+	// Falling through to the generic path would report a typo in the URL as the
+	// database being unreachable.
+	if !errors.Is(err, ErrDatabaseInstanceNotFound) {
+		t.Fatalf("err = %v, want ErrDatabaseInstanceNotFound", err)
+	}
+}

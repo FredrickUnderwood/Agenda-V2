@@ -199,6 +199,8 @@ func queryStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, service.ErrQueryForbidden):
 		return http.StatusForbidden
+	case errors.Is(err, service.ErrDatabaseInstanceNotFound):
+		return http.StatusNotFound
 	case errors.Is(err, service.ErrDatabaseInstanceNotAgent):
 		return http.StatusConflict
 	default:

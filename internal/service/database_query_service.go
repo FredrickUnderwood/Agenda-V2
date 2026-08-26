@@ -25,6 +25,11 @@ import (
 // that environment.
 var ErrQueryForbidden = errors.New("querying this database requires admin privileges")
 
+// ErrDatabaseInstanceNotFound distinguishes "no such instance" from the
+// database being unreachable, which are different answers and different
+// statuses.
+var ErrDatabaseInstanceNotFound = errors.New("database instance not found")
+
 // ErrAuditEntryNotFound covers both "no such entry" and "not yours". The two
 // are deliberately indistinguishable: telling a caller that an entry exists but
 // belongs to somebody else is itself a disclosure.
@@ -122,7 +127,7 @@ type QueryResult struct {
 func (s *DatabaseQueryService) Query(ctx context.Context, p Principal, instanceID int64, req QueryRequest) (*QueryResult, error) {
 	inst, err := s.instances.Get(ctx, instanceID)
 	if err != nil {
-		return nil, err
+		return nil, ErrDatabaseInstanceNotFound
 	}
 	if err := AuthorizeQuery(p, inst); err != nil {
 		return nil, err
@@ -223,6 +228,11 @@ func (s *DatabaseQueryService) TestInstance(ctx context.Context, instanceID int6
 // ListDatabases and ListTables answer the two questions a console cannot be
 // used without: which schemas exist, and what is in the one I picked. Both go
 // through the same guarded path as any other statement.
+//
+// ListDatabases deliberately connects with no schema selected: SHOW DATABASES
+// does not need one, and opening the instance's default schema first would make
+// listing fail whenever that schema is missing or not readable — a confusing
+// error for a question that never involved it.
 func (s *DatabaseQueryService) ListDatabases(ctx context.Context, p Principal, instanceID int64) ([]string, error) {
 	return s.singleColumn(ctx, p, instanceID, "", "SHOW DATABASES")
 }
@@ -237,13 +247,10 @@ func (s *DatabaseQueryService) ListTables(ctx context.Context, p Principal, inst
 func (s *DatabaseQueryService) singleColumn(ctx context.Context, p Principal, instanceID int64, database, stmt string) ([]string, error) {
 	inst, err := s.instances.Get(ctx, instanceID)
 	if err != nil {
-		return nil, err
+		return nil, ErrDatabaseInstanceNotFound
 	}
 	if err := AuthorizeQuery(p, inst); err != nil {
 		return nil, err
-	}
-	if database == "" {
-		database = inst.DefaultDatabase
 	}
 	resp, err := s.execute(ctx, instanceID, database, stmt, contract.NodeDBMaxRows, 10000)
 	if err != nil {
