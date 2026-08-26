@@ -1,11 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Alert, Button, Card, Empty, Input, InputNumber, Select, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, InputNumber, Select, Space, Tag, Typography } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import * as api from '@/api/databases'
 import type { DatabaseInstance, QueryResult } from '@/api/types'
 import { errorMessage } from '@/utils/errorMessage'
 import { ResultGrid } from './resultGrid'
+import { SqlEditor } from './SqlEditor'
+
+// MySQL's own schemas. They are grouped to the bottom of the picker rather than
+// removed: information_schema in particular is a legitimate thing to query from
+// a console, it just should not sit between an operator and their own schemas.
+const SYSTEM_SCHEMAS = new Set(['information_schema', 'performance_schema', 'mysql', 'sys'])
 
 export function SqlConsole({ instances, loading }: { instances: DatabaseInstance[]; loading: boolean }) {
   const runnable = useMemo(() => instances.filter((i) => i.enabled), [instances])
@@ -31,6 +37,27 @@ export function SqlConsole({ instances, loading }: { instances: DatabaseInstance
     enabled: !!instanceId && !!database,
     retry: false,
   })
+
+  // Completion data. Deliberately best-effort and separate from the table
+  // picker above: it reads information_schema, which can be slow on a large
+  // server, and the console must stay usable when it is unavailable.
+  const outline = useQuery({
+    queryKey: ['db-schema', instanceId, database],
+    queryFn: () => api.getSchemaOutline(instanceId!, database!),
+    enabled: !!instanceId && !!database,
+    retry: false,
+  })
+
+  const schemaOptions = useMemo(() => {
+    const all = databases.data?.data ?? []
+    const own = all.filter((d) => !SYSTEM_SCHEMAS.has(d.toLowerCase()))
+    const system = all.filter((d) => SYSTEM_SCHEMAS.has(d.toLowerCase()))
+    const toOption = (d: string) => ({ value: d, label: d })
+    return [
+      ...(own.length ? [{ label: 'Schemas', options: own.map(toOption) }] : []),
+      ...(system.length ? [{ label: 'System', options: system.map(toOption) }] : []),
+    ]
+  }, [databases.data])
 
   const runMutation = useMutation({
     mutationFn: () => api.runQuery(instanceId!, { database, sql, max_rows: maxRows }),
@@ -80,7 +107,7 @@ export function SqlConsole({ instances, loading }: { instances: DatabaseInstance
           loading={databases.isFetching}
           disabled={!instanceId}
           showSearch
-          options={(databases.data?.data ?? []).map((d) => ({ value: d, label: d }))}
+          options={schemaOptions}
           notFoundContent={databases.error ? errorMessage(databases.error) : undefined}
         />
         <Select
@@ -107,20 +134,14 @@ export function SqlConsole({ instances, loading }: { instances: DatabaseInstance
         />
       )}
 
-      <Input.TextArea
-        className="agenda-mono"
+      <SqlEditor
         value={sql}
-        onChange={(e) => setSql(e.target.value)}
-        placeholder="SELECT … — read-only statements only"
-        autoSize={{ minRows: 6, maxRows: 16 }}
-        spellCheck={false}
+        onChange={setSql}
+        schema={outline.data?.tables}
         // Running on Cmd/Ctrl+Enter is what anyone arriving from a database
         // client will try first.
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canRun) {
-            e.preventDefault()
-            runMutation.mutate()
-          }
+        onRun={() => {
+          if (canRun) runMutation.mutate()
         }}
       />
 
@@ -136,6 +157,7 @@ export function SqlConsole({ instances, loading }: { instances: DatabaseInstance
         </Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Enter · SELECT, WITH, SHOW, DESCRIBE and EXPLAIN only
+          {database && outline.isError && ' · completion unavailable for this schema'}
         </Typography.Text>
       </Space>
 

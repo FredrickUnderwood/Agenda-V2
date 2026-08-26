@@ -244,6 +244,69 @@ func (s *DatabaseQueryService) ListTables(ctx context.Context, p Principal, inst
 	return s.singleColumn(ctx, p, instanceID, database, "SHOW TABLES")
 }
 
+// SchemaOutline returns every table in a schema with its column names, in one
+// round trip, for the console's editor completion.
+//
+// It reads information_schema rather than issuing SHOW COLUMNS per table: that
+// would be one relayed query per table, and information_schema is already
+// filtered by the connecting account's own privileges, so a read-only account
+// scoped to one schema sees exactly what it is allowed to read and nothing
+// else.
+func (s *DatabaseQueryService) SchemaOutline(ctx context.Context, p Principal, instanceID int64, database string) (map[string][]string, error) {
+	database = strings.TrimSpace(database)
+	if database == "" {
+		return nil, errors.New("database is required")
+	}
+	inst, err := s.instances.Get(ctx, instanceID)
+	if err != nil {
+		return nil, ErrDatabaseInstanceNotFound
+	}
+	if err := AuthorizeQuery(p, inst); err != nil {
+		return nil, err
+	}
+
+	quoted, err := quoteMySQLString(database)
+	if err != nil {
+		return nil, err
+	}
+	stmt := "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS" +
+		" WHERE TABLE_SCHEMA = " + quoted +
+		" ORDER BY TABLE_NAME, ORDINAL_POSITION"
+
+	// No default schema: the statement names the one it is asking about, so it
+	// must not also depend on that schema being openable.
+	resp, err := s.execute(ctx, instanceID, "", stmt, contract.NodeDBMaxRows, 15000)
+	if err != nil {
+		return nil, err
+	}
+
+	outline := make(map[string][]string)
+	for _, row := range resp.Rows {
+		if len(row) < 2 || row[0] == nil || row[1] == nil {
+			continue
+		}
+		outline[*row[0]] = append(outline[*row[0]], *row[1])
+	}
+	return outline, nil
+}
+
+// quoteMySQLString renders v as a MySQL string literal.
+//
+// The statement above is assembled by concatenation because the node relay
+// carries a statement, not a statement plus parameters. That is acceptable here
+// only because the caller is already authorized to run arbitrary SELECTs
+// against this instance, so nothing is reachable through this string that was
+// not reachable anyway — but the escaping still has to be right, or a schema
+// named with a quote would produce a syntax error rather than a result.
+func quoteMySQLString(v string) (string, error) {
+	if strings.ContainsAny(v, "\x00\n\r") {
+		return "", errors.New("invalid database name")
+	}
+	escaped := strings.ReplaceAll(v, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "'", "''")
+	return "'" + escaped + "'", nil
+}
+
 func (s *DatabaseQueryService) singleColumn(ctx context.Context, p Principal, instanceID int64, database, stmt string) ([]string, error) {
 	inst, err := s.instances.Get(ctx, instanceID)
 	if err != nil {

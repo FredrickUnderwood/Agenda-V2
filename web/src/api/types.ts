@@ -504,3 +504,10 @@ export interface TestDatabaseInstanceResult {
   server_version?: string
   error?: string
 }
+
+// Every table in a schema with its column names, in one call — the shape the
+// editor's completion needs. Best-effort: on a very large schema this can be
+// slow or truncated, and the console degrades to completion without columns.
+export interface SchemaOutline {
+  tables: Record<string, string[]>
+}

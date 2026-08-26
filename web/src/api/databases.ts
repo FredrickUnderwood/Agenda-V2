@@ -7,6 +7,7 @@ import type {
   ListResponse,
   QueryRequest,
   QueryResult,
+  SchemaOutline,
   TestDatabaseInstanceResult,
   UpdateDatabaseInstanceRequest,
 } from './types'
@@ -45,6 +46,15 @@ export function listDatabases(id: number) {
 export function listTables(id: number, database: string) {
   return apiClient
     .get<ListResponse<string>>(`/db-instances/${id}/tables`, { params: { database } })
+    .then((r) => r.data)
+}
+
+// Backs editor completion. Kept separate from listTables because it is the
+// expensive one — it reads information_schema — and the table picker must not
+// depend on it.
+export function getSchemaOutline(id: number, database: string) {
+  return apiClient
+    .get<SchemaOutline>(`/db-instances/${id}/schema`, { params: { database }, timeout: 30_000 })
     .then((r) => r.data)
 }
 

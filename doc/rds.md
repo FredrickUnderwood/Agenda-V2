@@ -233,6 +233,18 @@ The node also asks the server to enforce the timeout itself
 (`max_execution_time`, or `max_statement_time` on MariaDB), so a query outlives
 neither side.
 
+## The editor
+
+The console editor does MySQL syntax highlighting and completion for keywords,
+tables and columns, using the schema you have selected. `Cmd`/`Ctrl`+`Enter`
+runs the statement.
+
+The schema picker groups MySQL's own schemas (`information_schema`,
+`performance_schema`, `mysql`, `sys`) under **System**, below your own. They are
+grouped rather than hidden: querying `information_schema` from a console is a
+reasonable thing to want, it just should not sit between you and your own
+schemas.
+
 ## Query history
 
 Every statement that runs is recorded: who ran it, against what, how long it
@@ -259,5 +271,8 @@ plane's own logs.
 - MySQL only. The `engine` field exists so another can be added, but nothing
   else is implemented.
 - Reads only. There is no plan to add writes through this path.
-- Schema browsing covers schemas and tables, not columns.
+- Editor completion reads `information_schema.COLUMNS` for the selected schema.
+  On a server with very many tables that call can be slow or hit the row cap, in
+  which case completion is partial or absent — the console says so and stays
+  usable.
 - The database must be on the machine it is registered against (see above).

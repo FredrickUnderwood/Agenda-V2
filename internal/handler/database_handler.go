@@ -159,6 +159,23 @@ func (s *Server) listDatabaseInstanceTables(c *gin.Context) {
 	Success(c, gin.H{"data": names, "total": len(names)})
 }
 
+// getDatabaseInstanceSchema backs the editor's completion: one call returns
+// every table in a schema with its columns, rather than making the browser ask
+// per table.
+func (s *Server) getDatabaseInstanceSchema(c *gin.Context) {
+	id, ok := paramInt64(c, "instanceID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid database instance ID")
+		return
+	}
+	outline, err := s.dbQuerySvc.SchemaOutline(c.Request.Context(), s.principal(c), id, c.Query("database"))
+	if err != nil {
+		FailWith(c, queryStatus(err), err)
+		return
+	}
+	Success(c, gin.H{"tables": outline})
+}
+
 func (s *Server) listDBQueryLogs(c *gin.Context) {
 	limit := queryInt(c, "limit", 50)
 	if limit > 200 {

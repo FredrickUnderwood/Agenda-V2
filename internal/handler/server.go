@@ -189,6 +189,7 @@ func (s *Server) registerRoutes() {
 		dbInstances.POST("/:instanceID/query", s.queryDatabaseInstance)
 		dbInstances.GET("/:instanceID/databases", s.listDatabaseInstanceDatabases)
 		dbInstances.GET("/:instanceID/tables", s.listDatabaseInstanceTables)
+		dbInstances.GET("/:instanceID/schema", s.getDatabaseInstanceSchema)
 	}
 
 	// Registering or editing an instance stores a database password, so those

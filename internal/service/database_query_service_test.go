@@ -355,3 +355,52 @@ func TestQueryOnAnUnknownInstanceIsNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrDatabaseInstanceNotFound", err)
 	}
 }
+
+func TestQuoteMySQLString(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"shop", "'shop'"},
+		{"my-db", "'my-db'"},
+		{"it's", "'it''s'"},
+		{`back\slash`, `'back\\slash'`},
+		// The classic injection attempt has to come back as one inert literal.
+		{"x' OR '1'='1", "'x'' OR ''1''=''1'"},
+	}
+	for _, tc := range cases {
+		got, err := quoteMySQLString(tc.in)
+		if err != nil {
+			t.Fatalf("quoteMySQLString(%q): %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("quoteMySQLString(%q) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+
+	for _, bad := range []string{"a\x00b", "a\nb", "a\rb"} {
+		if _, err := quoteMySQLString(bad); err == nil {
+			t.Fatalf("quoteMySQLString(%q) should be refused", bad)
+		}
+	}
+}
+
+func TestSchemaOutlineRequiresADatabase(t *testing.T) {
+	instSvc, querySvc, _, _ := newDatabaseTestServices(t, secret.NewBox(""))
+	created, err := instSvc.Create(context.Background(), baseCreateRequest())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := querySvc.SchemaOutline(context.Background(), Principal{IsAdmin: true}, created.ID, "  "); err == nil {
+		t.Fatal("an outline with no schema named should be refused")
+	}
+}
+
+func TestSchemaOutlineIsAuthorized(t *testing.T) {
+	instSvc, querySvc, _, _ := newDatabaseTestServices(t, secret.NewBox(""))
+	created, err := instSvc.Create(context.Background(), baseCreateRequest()) // prod
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, err = querySvc.SchemaOutline(context.Background(), Principal{UserID: 9, Username: "mallory"}, created.ID, "shop")
+	if !errors.Is(err, ErrQueryForbidden) {
+		t.Fatalf("err = %v, want ErrQueryForbidden — completion must not be a way around the env gate", err)
+	}
+}
