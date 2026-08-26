@@ -70,6 +70,8 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	notificationRepo := repository.NewNotificationRepository(db)
 	alertRuleRepo := repository.NewAlertRuleRepository(db)
+	dbInstanceRepo := repository.NewDatabaseInstanceRepository(db)
+	dbQueryLogRepo := repository.NewDBQueryLogRepository(db)
 
 	// One-time data migration: env vars used to live on the application as a
 	// single all-environments baseline; they are now per-environment. Move any
@@ -97,6 +99,11 @@ func main() {
 	envDeploymentSvc := service.NewEnvDeploymentService(envDeploymentRepo, appReleaseRepo)
 	appLogSvc := service.NewApplicationLogService(appRepo, appTargetRepo, appReleaseRepo, machineSvc, cfg.WorkspaceRoot)
 	appMetricsSvc := service.NewApplicationMetricsService(appRepo, appTargetRepo, machineSvc)
+	// Queries are relayed through the target machine's agenda-node, so the
+	// instance service resolves machines via machineSvc (which decrypts the
+	// agent token) rather than the raw repository — same reason logs and
+	// metrics do.
+	dbInstanceSvc := service.NewDatabaseInstanceService(dbInstanceRepo, machineSvc, secretBox)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)
@@ -108,6 +115,7 @@ func main() {
 	// runtime; the static yaml git.tokens map remains as a bootstrap fallback.
 	cfg.Git.TokenResolver = settingSvc.GitToken
 	cfg.Git.SecretValues = settingSvc.SecretValues
+	dbQuerySvc := service.NewDatabaseQueryService(dbInstanceSvc, dbQueryLogRepo, settingSvc, secretBox)
 	alertSvc := service.NewAlertService(settingSvc, notificationRepo)
 	alertRuleSvc := service.NewAlertRuleService(alertRuleRepo, settingSvc, alertSvc)
 	notificationSvc := service.NewNotificationService(notificationRepo)
@@ -139,6 +147,12 @@ func main() {
 	machineMonitor.Start()
 	defer machineMonitor.Stop()
 
+	// Audit entries hold real query results; this keeps them from outliving
+	// their retention window (rds.query_log_retention_days).
+	dbQueryLogMonitor := application.NewDBQueryLogMonitor(dbQuerySvc, time.Hour)
+	dbQueryLogMonitor.Start()
+	defer dbQueryLogMonitor.Stop()
+
 	// Push edge-TLS credentials (from Settings) to the gateway on a ticker so the
 	// gateway can auto-issue certs without those secrets in its env, and so a
 	// gateway restart is re-primed. Only when gateway integration is enabled.
@@ -150,7 +164,7 @@ func main() {
 	}
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, dbInstanceSvc, dbQuerySvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

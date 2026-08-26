@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
+	"github.com/FredrickUnderwood/agenda-v2/internal/sqlguard"
 )
 
 // Server is agenda-node's management API (jobs + proxy registration + health).
@@ -63,7 +65,42 @@ func (s *Server) registerRoutes() {
 		v1.GET("/logs/:app/:instance", s.getLogs)
 		v1.GET("/metrics/:app/:instance", s.getMetrics)
 		v1.GET("/probe/:app/:instance", s.probe)
+		v1.POST("/db/query", s.dbQuery)
 	}
+}
+
+// dbQuery runs one read-only statement against a database on this machine and
+// relays the result set. Like getMetrics and probe, the target is reachable
+// only from here — the control plane never opens a database connection itself,
+// so a registered database needs no port published to the network.
+//
+// The statement is re-validated here even though the control plane already
+// validated it: this endpoint is reachable by anything holding the node token,
+// and a guard that only runs on the caller's side guards nothing.
+func (s *Server) dbQuery(c *gin.Context) {
+	var req contract.NodeDBQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := clampDBQueryRequest(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := runLocalQuery(c.Request.Context(), s.backendHost, req)
+	if err != nil {
+		if errors.Is(err, sqlguard.ErrRejected) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// The node was reachable and did attempt the query, so this is a 200
+		// carrying the database's own failure — same convention as probe. It
+		// lets the control plane tell "node down" from "database down".
+		c.JSON(http.StatusOK, contract.NodeDBQueryResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) tokenAuth() gin.HandlerFunc {
