@@ -35,6 +35,42 @@ When reporting, please include:
   consent, credit you in the advisory. Please give us a reasonable window to
   remediate before any public disclosure.
 
+## Hardening the Databases module
+
+The Databases module lets an operator run read-only SQL against a database from
+the web console. Queries never travel over a database port exposed to the
+network: the control plane relays them to the machine's `agenda-node` agent,
+which opens the connection locally. Three properties are yours to configure, and
+the module is only as safe as the weakest of them.
+
+**1. Use a dedicated read-only database account.** agenda-v2 parses each
+statement and rejects anything that is not a single
+`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`, and it sets
+`transaction_read_only` on every session. Treat both as protection against
+mistakes, not as a security boundary — the boundary is the account's own grants.
+Grant `SELECT` (and `SHOW VIEW` if you want schema browsing) at the *database*
+level so newly created tables are covered without re-granting, and do not grant
+`FILE`, `PROCESS`, or `SUPER`. See [doc/rds.md](doc/rds.md) for the exact
+statements.
+
+**2. Keep the database bound to loopback and the container bridge only.** The
+node agent connects to `<proxy_backend_host>:<port>` on its own machine. Nothing
+needs to reach the database port from outside the host — do not publish it.
+
+**3. Set `security.master_key`.** Database passwords and stored query results are
+encrypted at rest with this key. Without it they are written to the
+control-plane database in plaintext, and the control plane logs a warning on
+every write.
+
+Two further notes on the audit trail:
+
+- Query results are stored (capped and encrypted) so users can revisit their own
+  history, which means production data reaches the control-plane database and its
+  backups. Tune `rds.query_log_retention_days` to your data-handling policy.
+- The `agenda-node` management port carries database credentials on every query.
+  It must be bound to a private interface or a VPN; if it has to cross an
+  untrusted network, terminate TLS in front of it.
+
 ## Scope notes
 
 agenda-v2 is infrastructure you self-host, so its security also depends on how you
