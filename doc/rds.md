@@ -239,6 +239,17 @@ The console editor does MySQL syntax highlighting and completion for keywords,
 tables and columns, using the schema you have selected. `Cmd`/`Ctrl`+`Enter`
 runs the statement.
 
+Columns complete both qualified and bare, so all three of these work:
+
+```sql
+SELECT * FROM orders WHERE cus…       -- columns of the tables in the statement
+SELECT * FROM orders WHERE orders.…   -- qualified by table name
+SELECT * FROM orders o WHERE o.…      -- qualified by alias
+```
+
+With more than one table in the statement, each suggestion is labelled with the
+table or alias it came from.
+
 The schema picker groups MySQL's own schemas (`information_schema`,
 `performance_schema`, `mysql`, `sys`) under **System**, below your own. They are
 grouped rather than hidden: querying `information_schema` from a console is a

@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react'
 import CodeMirror, { EditorView, Prec, keymap } from '@uiw/react-codemirror'
 import { MySQL, sql } from '@codemirror/lang-sql'
 import type { SQLNamespace } from '@codemirror/lang-sql'
+import { unqualifiedColumnSource } from './sqlCompletion'
 
 export function SqlEditor({
   value,
@@ -25,9 +26,15 @@ export function SqlEditor({
   const runRef = useRef(onRun)
   runRef.current = onRun
 
-  const extensions = useMemo(
-    () => [
-      sql({ dialect: MySQL, schema, upperCaseKeywords: true }),
+  const extensions = useMemo(() => {
+    const base = sql({ dialect: MySQL, schema, upperCaseKeywords: true })
+    return [
+      base,
+      // Registered as a second source for the SQL language rather than
+      // replacing lang-sql's: it only covers unqualified columns, and
+      // everything else — keywords, tables, qualified names — stays with the
+      // source that already does it properly.
+      base.language.data.of({ autocomplete: unqualifiedColumnSource(schema) }),
       // Highest precedence so it wins over the completion popup's own Enter
       // handling: Cmd/Ctrl+Enter should run the query even mid-completion.
       Prec.highest(
@@ -42,9 +49,8 @@ export function SqlEditor({
         ]),
       ),
       EditorView.lineWrapping,
-    ],
-    [schema],
-  )
+    ]
+  }, [schema])
 
   return (
     <CodeMirror
