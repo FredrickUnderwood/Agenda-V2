@@ -30,7 +30,18 @@ type Server struct {
 	engine      *gin.Engine
 	started     time.Time
 	backendHost string
+
+	// fileRoots, when non-empty, confines every file upload/stat to those
+	// directory trees; empty means only the "clean absolute path" rule applies.
+	// maxUploadBytes caps a single upload.
+	fileRoots      []string
+	maxUploadBytes int64
 }
+
+// DefaultMaxUploadBytes bounds an upload when the operator has not configured
+// max_upload_bytes. It is applied by NewServer rather than left at zero so a
+// node that never calls SetFileConfig still refuses an unbounded body.
+const DefaultMaxUploadBytes int64 = 256 << 20
 
 func NewServer(token string, jobs *JobStore, registry *ProxyRegistry, backendHost string) *Server {
 	gin.SetMode(gin.ReleaseMode)
@@ -42,10 +53,22 @@ func NewServer(token string, jobs *JobStore, registry *ProxyRegistry, backendHos
 		engine:      gin.New(),
 		started:     time.Now(),
 		backendHost: backendHost,
+
+		maxUploadBytes: DefaultMaxUploadBytes,
 	}
 	s.engine.Use(gin.Recovery())
 	s.registerRoutes()
 	return s
+}
+
+// SetFileConfig applies the operator's file_roots / max_upload_bytes. Called
+// once at startup; a zero maxUploadBytes leaves NewServer's default in place,
+// since "no limit" is never what an unset value should mean here.
+func (s *Server) SetFileConfig(roots []string, maxUploadBytes int64) {
+	s.fileRoots = roots
+	if maxUploadBytes > 0 {
+		s.maxUploadBytes = maxUploadBytes
+	}
 }
 
 // Handler exposes the gin engine (for httptest and for embedding).
@@ -66,6 +89,8 @@ func (s *Server) registerRoutes() {
 		v1.GET("/metrics/:app/:instance", s.getMetrics)
 		v1.GET("/probe/:app/:instance", s.probe)
 		v1.POST("/db/query", s.dbQuery)
+		v1.POST("/files", s.putFile)
+		v1.GET("/files/stat", s.statFile)
 	}
 }
 

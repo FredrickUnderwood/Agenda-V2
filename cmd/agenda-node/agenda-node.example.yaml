@@ -22,6 +22,21 @@ token: "replace-with-random-secret"
 # Control plane base URL, for heartbeats.
 central_base_url: "http://10.0.0.1:8080"
 
+# Directories the control plane may upload files into (/v1/files). Empty means
+# only "must be a clean absolute path" applies — which grants nothing new, since
+# /v1/jobs under the same token already runs arbitrary commands. Setting it to
+# your workspace root is still worth doing: it stops a control-plane bug from
+# writing outside the tree agenda owns.
+#
+# NOTE for containerized nodes: the node writes inside its own filesystem, so a
+# path that is not bind-mounted from the host lands in the container and is lost
+# on restart. Keep these roots inside the workspace root the compose file mounts.
+file_roots:
+  - "/root/.agenda-v2/workspaces"
+
+# Largest single upload accepted. Default 256MiB.
+max_upload_bytes: 268435456
+
 heartbeat_interval: "15s"
 max_output_bytes: 65536
 job_retention: "1h" # how long finished jobs stay in memory before GC

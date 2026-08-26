@@ -6,12 +6,14 @@ import * as api from '@/api/machines'
 import type { CreateMachineRequest, Machine } from '@/api/types'
 import { StatusPill } from '@/components/StatusPill'
 import { errorMessage } from '@/utils/errorMessage'
+import { MachineFilesDrawer } from './MachineFilesDrawer'
 
 export function MachinesListPage() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [agentCredentials, setAgentCredentials] = useState<{ machineId: number; token: string } | null>(null)
+  const [filesMachine, setFilesMachine] = useState<Machine | null>(null)
   const [form] = Form.useForm<CreateMachineRequest>()
   const mode = Form.useWatch('mode', form)
 
@@ -94,6 +96,9 @@ export function MachinesListPage() {
             key: 'actions',
             render: (_, m) => (
               <div style={{ display: 'flex', gap: 8 }}>
+                <Button size="small" onClick={() => setFilesMachine(m)}>
+                  Files
+                </Button>
                 {m.mode === 'agent' && (
                   <Popconfirm
                     title="Rotate this machine's agent token?"
@@ -115,6 +120,12 @@ export function MachinesListPage() {
           },
         ]}
         locale={{ emptyText: 'No machines yet — add one to deploy applications onto it.' }}
+      />
+
+      <MachineFilesDrawer
+        machine={filesMachine}
+        open={filesMachine !== null}
+        onClose={() => setFilesMachine(null)}
       />
 
       <Modal

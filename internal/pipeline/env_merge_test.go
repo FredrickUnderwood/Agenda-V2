@@ -27,7 +27,7 @@ func TestMergeEnvLayering(t *testing.T) {
 		domain.EnvironmentProd:  {"DB_DSN": "prod-dsn", "LOG_LEVEL": "warn", "EMPTY": ""},
 		domain.EnvironmentStage: {"DB_DSN": "stage-dsn"},
 	}
-	b := NewBuilder(nil, nil, nil, envConfig)
+	b := NewBuilder(nil, nil, nil, envConfig, nil)
 	dockerCfg := &domain.DockerDeployConfig{Env: map[string]string{
 		"DB_DSN":        "baseline-dsn",
 		"LOG_LEVEL":     "info",
@@ -107,7 +107,7 @@ func TestMergeEnvLayering(t *testing.T) {
 func TestMergeEnvDoesNotMutateBaseline(t *testing.T) {
 	b := NewBuilder(nil, nil, nil, fakeEnvConfig{
 		domain.EnvironmentProd: {"LOG_LEVEL": "warn"},
-	})
+	}, nil)
 	dockerCfg := &domain.DockerDeployConfig{Env: map[string]string{"LOG_LEVEL": "info"}}
 	target := &domain.DeployTarget{
 		App:       &domain.Application{ID: 1, Name: "svc"},

@@ -42,6 +42,15 @@ type Config struct {
 	MaxOutputBytes    int      `yaml:"max_output_bytes"`
 	JobRetention      Duration `yaml:"job_retention"`
 
+	// FileRoots confines every file upload and stat request (/v1/files) to
+	// these directory trees. Empty means only the "clean absolute path" rule
+	// applies — which is the pre-existing privilege level, since /v1/jobs
+	// already runs arbitrary commands under the same token; set it to the
+	// workspace root to keep a control-plane bug from writing outside it.
+	FileRoots []string `yaml:"file_roots"`
+	// MaxUploadBytes caps a single upload. 0 leaves DefaultMaxUploadBytes.
+	MaxUploadBytes int64 `yaml:"max_upload_bytes"`
+
 	// ProxyDrainTimeout is how long shutdown waits for relayed WebSocket
 	// tunnels to end before force-closing them. Hijacked connections are
 	// invisible to http.Server.Shutdown, so without an explicit wait a node

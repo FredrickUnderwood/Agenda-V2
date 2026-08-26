@@ -43,6 +43,10 @@ func main() {
 
 	// Management API (jobs + proxy registration + health), token-protected.
 	mgmt := node.NewServer(cfg.Token, jobs, registry, cfg.ProxyBackendHost)
+	mgmt.SetFileConfig(cfg.FileRoots, cfg.MaxUploadBytes)
+	if len(cfg.FileRoots) == 0 {
+		log.L().Warn("file_roots is empty; /v1/files may write anywhere this process can reach — set it to the workspace root")
+	}
 	mgmtSrv := &http.Server{Addr: cfg.ListenAddr, Handler: mgmt.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	// Data-plane reverse proxy (gateway backends point here), no auth.

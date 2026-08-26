@@ -40,10 +40,11 @@ type Builder struct {
 	machineSvc   MachineGetter
 	targetLister ApplicationTargetLister
 	envConfigSvc EnvConfigGetter
+	fileChecker  EnvFileChecker
 }
 
-func NewBuilder(cfg *config.Config, machineSvc MachineGetter, targetLister ApplicationTargetLister, envConfigSvc EnvConfigGetter) *Builder {
-	return &Builder{cfg: cfg, machineSvc: machineSvc, targetLister: targetLister, envConfigSvc: envConfigSvc}
+func NewBuilder(cfg *config.Config, machineSvc MachineGetter, targetLister ApplicationTargetLister, envConfigSvc EnvConfigGetter, fileChecker EnvFileChecker) *Builder {
+	return &Builder{cfg: cfg, machineSvc: machineSvc, targetLister: targetLister, envConfigSvc: envConfigSvc, fileChecker: fileChecker}
 }
 
 // Build returns the ordered blueprints plus the resolved on-machine clone
@@ -75,6 +76,10 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 		return nil, "", err
 	}
 	logDir, err := b.resolveInstanceLogDir(target, machine)
+	if err != nil {
+		return nil, "", err
+	}
+	filesDir, err := b.resolveEnvFilesDir(target, machine)
 	if err != nil {
 		return nil, "", err
 	}
@@ -118,8 +123,13 @@ func (b *Builder) buildDocker(ctx context.Context, target *domain.DeployTarget) 
 			Machine: machine, WorkDir: dockerCfg.WorkDir, ComposeFile: composeFile,
 			ProjectName: projectName, Port: port, MetricsPort: metricsPort, Services: dockerCfg.Services,
 			AppName: target.App.Name, Branch: target.Branch, EnvName: string(target.Env()), InstanceName: targetInstanceName(target),
-			LogDir: logDir,
-			Env:    mergedEnv,
+			LogDir:   logDir,
+			FilesDir: filesDir,
+			Env:      mergedEnv,
+
+			FileChecker: b.fileChecker,
+			AppID:       target.App.ID,
+			MachineID:   targetMachineID(target),
 		},
 	})
 	if composeHealthCheckEnabled(dockerCfg) {
@@ -525,6 +535,30 @@ func (b *Builder) resolveInstanceLogDir(target *domain.DeployTarget, machine *co
 		root = b.cfg.WorkspaceRoot
 	}
 	return git.InstanceLogDir(root, target.App.Name, string(target.Env()), targetInstanceName(target), machine.IsLocal())
+}
+
+// targetMachineID is the DB-managed machine an instance is bound to, or 0 when
+// it is deployed to a config-file machine or to localhost.
+func targetMachineID(target *domain.DeployTarget) int64 {
+	if target == nil || target.EnvTarget == nil {
+		return 0
+	}
+	return target.EnvTarget.MachineID
+}
+
+// resolveEnvFilesDir picks the same workspace root as resolveLocalPath but
+// derives the environment's managed file directory
+// (<root>/run/<app>/<env>/.files). Like the log dir it is branch-independent,
+// and unlike it, it is shared by every instance of the environment.
+func (b *Builder) resolveEnvFilesDir(target *domain.DeployTarget, machine *config.MachineConfig) (string, error) {
+	root := ""
+	if machine != nil {
+		root = machine.WorkspaceRoot
+	}
+	if root == "" {
+		root = b.cfg.WorkspaceRoot
+	}
+	return git.EnvFilesDir(root, target.App.Name, string(target.Env()), machine.IsLocal())
 }
 
 // resolveDockerMachine: DB-managed machine (by ID, from the env target) →

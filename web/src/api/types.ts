@@ -352,6 +352,51 @@ export interface NodeLogsResponse {
   logs: NodeLogFile[]
 }
 
+export type FileScope = 'app_env' | 'machine'
+export type FileVerifyStatus = '' | 'ok' | 'changed' | 'missing' | 'unreachable'
+
+// One upload of one file to one machine. Uploads append rows rather than
+// replacing them, so a list is a history; `current` marks the row that
+// describes what is on disk now.
+export interface MachineFile {
+  id: number
+  scope: FileScope
+  application_id: number
+  app_name: string
+  env: Environment | ''
+  machine_id: number
+  machine_name: string
+  path: string
+  file_name: string
+  size: number
+  sha256: string
+  mode: string
+  user_id: number
+  username: string
+  created_at: string
+  last_verified_at: string | null
+  last_verify_status: FileVerifyStatus
+  last_verify_sha256: string
+  last_verify_error: string
+  current: boolean
+}
+
+// An environment upload reaches several machines and any of them can fail on
+// its own, so the response reports each separately.
+export interface FileUploadResult {
+  machine_id: number
+  machine_name: string
+  path: string
+  success: boolean
+  error?: string
+  file?: MachineFile
+}
+
+export interface UploadEnvFileResponse {
+  data: FileUploadResult[]
+  container_path: string
+}
+
 export interface ListResponse<T> {
   data: T[]
   total: number

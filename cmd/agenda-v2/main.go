@@ -72,6 +72,7 @@ func main() {
 	alertRuleRepo := repository.NewAlertRuleRepository(db)
 	dbInstanceRepo := repository.NewDatabaseInstanceRepository(db)
 	dbQueryLogRepo := repository.NewDBQueryLogRepository(db)
+	machineFileRepo := repository.NewMachineFileRepository(db)
 
 	// One-time data migration: env vars used to live on the application as a
 	// single all-environments baseline; they are now per-environment. Move any
@@ -104,6 +105,10 @@ func main() {
 	// agent token) rather than the raw repository — same reason logs and
 	// metrics do.
 	dbInstanceSvc := service.NewDatabaseInstanceService(dbInstanceRepo, machineSvc, secretBox)
+	// File uploads reach machines through the same runner abstraction deploys
+	// use, so they work for agent and SSH machines alike; machineSvc is passed
+	// (not the repo) because an agent-mode transfer needs the decrypted token.
+	machineFileSvc := service.NewMachineFileService(machineFileRepo, appRepo, appTargetRepo, machineSvc, cfg.WorkspaceRoot)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)
@@ -126,7 +131,7 @@ func main() {
 	}
 
 	// Pipeline
-	builder := pipeline.NewBuilder(cfg, machineSvc, appSvc, appEnvironmentSvc)
+	builder := pipeline.NewBuilder(cfg, machineSvc, appSvc, appEnvironmentSvc, machineFileSvc)
 	runner := pipeline.NewRunner(cfg, logSvc, stepSvc)
 
 	// Application
@@ -147,6 +152,12 @@ func main() {
 	machineMonitor.Start()
 	defer machineMonitor.Stop()
 
+	// Uploaded files live on the machines, not in this database, so the only way
+	// to know one is still there is to go and look periodically.
+	machineFileMonitor := application.NewMachineFileMonitor(machineFileSvc, 15*time.Minute)
+	machineFileMonitor.Start()
+	defer machineFileMonitor.Stop()
+
 	// Audit entries hold real query results; this keeps them from outliving
 	// their retention window (rds.query_log_retention_days).
 	dbQueryLogMonitor := application.NewDBQueryLogMonitor(dbQuerySvc, time.Hour)
@@ -164,7 +175,7 @@ func main() {
 	}
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, logSvc, appLogSvc, appMetricsSvc, dbInstanceSvc, dbQuerySvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, machineFileSvc, logSvc, appLogSvc, appMetricsSvc, dbInstanceSvc, dbQuerySvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

@@ -63,10 +63,19 @@ func composeServiceNames(raw []byte) ([]string, error) {
 // identity. (instanceName also still appears in the log filename for
 // readability, but is no longer load-bearing for log isolation.)
 //
+// filesDir, when non-empty, is this environment's platform-managed file
+// directory (git.EnvFilesDir → <root>/run/<app>/<env>/.files); it is mounted
+// read-only at contract.AgendaContainerFilesDir and surfaced as
+// AGENDA_FILES_DIR. Unlike logDir it is shared by every instance of the
+// environment — a credential uploaded once has to be readable by blue and
+// green alike. Read-only because the platform is the only writer: a container
+// that rewrote a file here would make the console's checksum verification
+// report tampering on every deploy.
+//
 // metricsAddr, when non-empty (target has MetricsEnabled), additionally
 // injects AGENDA_METRICS_ADDR so sdk/go/metric knows where to listen; empty
 // omits the var entirely, leaving metrics registered-but-unserved by default.
-func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAddr string, services []string, userEnv map[string]string) ([]byte, error) {
+func buildOverrideYAML(logDir, filesDir, appName, branch, envName, instanceName, metricsAddr string, services []string, userEnv map[string]string) ([]byte, error) {
 	type svc struct {
 		Volumes     []string `yaml:"volumes"`
 		Environment []string `yaml:"environment"`
@@ -107,7 +116,15 @@ func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAd
 		if metricsAddr != "" {
 			env = append(env, "AGENDA_METRICS_ADDR="+metricsAddr)
 		}
+		if filesDir != "" {
+			env = append(env, contract.AgendaFilesDirEnv+"="+contract.AgendaContainerFilesDir)
+		}
 		return env
+	}
+
+	volumes := []string{logDir + ":" + contract.AgendaContainerLogDir}
+	if filesDir != "" {
+		volumes = append(volumes, filesDir+":"+contract.AgendaContainerFilesDir+":ro")
 	}
 
 	out := map[string]any{
@@ -115,7 +132,7 @@ func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAd
 			m := make(map[string]svc, len(services))
 			for _, name := range services {
 				m[name] = svc{
-					Volumes:     []string{logDir + ":" + contract.AgendaContainerLogDir},
+					Volumes:     volumes,
 					Environment: buildEnv(name),
 					Labels:      labels,
 				}
@@ -128,6 +145,15 @@ func buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAd
 
 // writeRemoteFile writes content to <dir>/<relPath> on whichever machine the
 // runner targets. base64 piping avoids shell-escaping pitfalls.
+//
+// Runner.PutFile would be the better transport — a single shell argument is
+// capped at 128KB by the kernel (MAX_ARG_STRLEN) and base64 inflates content by
+// a third, giving this form a silent ~96KB ceiling. It deliberately is not used
+// here: PutFile reaches an agent machine through agenda-node's /v1/files
+// endpoint, so switching this call would break every deploy to a node that has
+// not been upgraded yet, in exchange for headroom a generated compose override
+// (a few KB of env vars) does not need. Use PutFile for content a user supplies;
+// keep the deploy path on the API every node has always had.
 func writeRemoteFile(ctx context.Context, r runner.Runner, dir, relPath string, content []byte) error {
 	encoded := base64.StdEncoding.EncodeToString(content)
 	full := filepath.Join(dir, relPath)
@@ -162,11 +188,12 @@ func ensureRemoteDir(ctx context.Context, r runner.Runner, path string) error {
 // logDir is the absolute host path of this instance's runtime log directory
 // (git.InstanceLogDir); it is created on the target and bind-mounted into every
 // augmented service. It lives outside localPath (the code checkout) so a
-// re-clone can't wipe it.
+// re-clone can't wipe it. filesDir is the environment-wide managed file
+// directory (git.EnvFilesDir), created and mounted read-only the same way.
 func writeAgendaOverride(
 	ctx context.Context,
 	machine *config.MachineConfig,
-	localPath, composeFile, workDir, projectName, logDir, appName, branch, envName, instanceName, metricsAddr string,
+	localPath, composeFile, workDir, projectName, logDir, filesDir, appName, branch, envName, instanceName, metricsAddr string,
 	servicesFilter []string,
 	userEnv map[string]string,
 ) (string, error) {
@@ -200,13 +227,21 @@ func writeAgendaOverride(
 		return "", errors.New("no services to augment in " + composeAbs)
 	}
 
-	overrideYAML, err := buildOverrideYAML(logDir, appName, branch, envName, instanceName, metricsAddr, targets, userEnv)
+	overrideYAML, err := buildOverrideYAML(logDir, filesDir, appName, branch, envName, instanceName, metricsAddr, targets, userEnv)
 	if err != nil {
 		return "", err
 	}
 
 	if err := ensureRemoteDir(ctx, r, logDir); err != nil {
 		return "", errors.New("create host log dir: " + err.Error())
+	}
+	if filesDir != "" {
+		// Created even when the environment has no files yet: docker would
+		// otherwise create the bind-mount source itself, as a root-owned
+		// directory, which then breaks the first upload into it.
+		if err := ensureRemoteDir(ctx, r, filesDir); err != nil {
+			return "", errors.New("create host files dir: " + err.Error())
+		}
 	}
 	relPath := agendaOverrideRelPath(projectName)
 	if err := writeRemoteFile(ctx, r, localPath, relPath, overrideYAML); err != nil {

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/filestore"
 )
 
 const defaultPollInterval = 2 * time.Second
@@ -163,4 +166,96 @@ func (a *agentRunner) deleteJob(ctx context.Context, jobID string) error {
 	}
 	resp.Body.Close()
 	return nil
+}
+
+// agentUploadClient carries no timeout of its own because an upload is not
+// bounded the way a job dispatch is: a large file over a slow link legitimately
+// takes minutes, and the 30s dispatch timeout would abort it mid-transfer. The
+// request context (the caller's deadline) is what bounds it.
+//
+// agentStatClient does have one. A stat is a small, quick call, and some of its
+// callers — a console verify button — run under a request context with no
+// deadline at all, where a node that accepts the connection and then goes quiet
+// would hang the handler indefinitely.
+var (
+	agentUploadClient = &http.Client{}
+	agentStatClient   = &http.Client{Timeout: 30 * time.Second}
+)
+
+func (a *agentRunner) PutFile(ctx context.Context, path string, src io.Reader, mode string, overwrite bool) (contract.FileStat, error) {
+	u, err := url.Parse(a.baseURL() + "/v1/files")
+	if err != nil {
+		return contract.FileStat{}, err
+	}
+	q := u.Query()
+	q.Set(contract.NodeFileQueryPath, path)
+	if mode != "" {
+		q.Set(contract.NodeFileQueryMode, mode)
+	}
+	if overwrite {
+		q.Set(contract.NodeFileQueryOverwrite, "true")
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), src)
+	if err != nil {
+		return contract.FileStat{}, err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set(contract.HeaderNodeToken, a.machine.AgentToken)
+	return doFileRequest(agentUploadClient, req, "put file "+path)
+}
+
+func (a *agentRunner) StatFile(ctx context.Context, path string) (contract.FileStat, error) {
+	u, err := url.Parse(a.baseURL() + "/v1/files/stat")
+	if err != nil {
+		return contract.FileStat{}, err
+	}
+	q := u.Query()
+	q.Set(contract.NodeFileQueryPath, path)
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return contract.FileStat{}, err
+	}
+	req.Header.Set(contract.HeaderNodeToken, a.machine.AgentToken)
+	return doFileRequest(agentStatClient, req, "stat file "+path)
+}
+
+// doFileRequest performs a node file request and maps the node's status codes
+// back onto the filestore sentinels, so a caller sees the same error whichever
+// runner backend it happens to be talking to.
+func doFileRequest(client *http.Client, req *http.Request, what string) (contract.FileStat, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return contract.FileStat{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if err != nil {
+		return contract.FileStat{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(body))
+		switch resp.StatusCode {
+		case http.StatusConflict:
+			return contract.FileStat{}, filestore.ErrExists
+		case http.StatusRequestEntityTooLarge:
+			return contract.FileStat{}, filestore.ErrTooLarge
+		case http.StatusForbidden:
+			return contract.FileStat{}, fmt.Errorf("%w: %s", filestore.ErrOutsideRoots, msg)
+		case http.StatusNotFound:
+			// Every other node route predates file transfer, so a 404 here is
+			// almost always an agenda-node too old to have the endpoint at all
+			// — a fact worth stating instead of relaying "404 page not found".
+			return contract.FileStat{}, errors.New(what + " failed: this machine's agenda-node does not support file transfer; upgrade it")
+		}
+		return contract.FileStat{}, errors.New(what + " failed: " + resp.Status + ": " + msg)
+	}
+	var out contract.FileStat
+	if err := sonic.Unmarshal(body, &out); err != nil {
+		return contract.FileStat{}, err
+	}
+	return out, nil
 }

@@ -14,6 +14,11 @@ full design in [`doc/agenda-node-tech-design.md`](../../doc/agenda-node-tech-des
   drift.
 - **Heartbeat**: periodically reports liveness so the control plane can show the
   machine as online.
+- **File transfer**: accepts uploads (`POST /v1/files`) and reports what is on
+  disk (`GET /v1/files/stat`, including the file's SHA-256) so the console can
+  deliver a credential to this machine and later check that it is still there
+  and unchanged. Confine it with `file_roots`; see
+  [`doc/machine-files.md`](../../doc/machine-files.md).
 
 ## Ports
 

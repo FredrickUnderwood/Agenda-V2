@@ -98,3 +98,33 @@ func TestResolveInstanceRunDir_RejectsRelativeRoot(t *testing.T) {
 		t.Fatal("expected error for relative root")
 	}
 }
+
+func TestEnvFilesDir(t *testing.T) {
+	root := "/srv/agenda"
+	got, err := EnvFilesDir(root, "My App/v2", "prod", false)
+	if err != nil {
+		t.Fatalf("EnvFilesDir: %v", err)
+	}
+	want := "/srv/agenda/run/my-app-v2/prod/.files"
+	if got != want {
+		t.Errorf("EnvFilesDir = %q, want %q", got, want)
+	}
+}
+
+// The files directory shares a parent with the instance directories. Instance
+// names are slugged to start with a letter or digit, so the dot prefix is what
+// guarantees an instance can never be named into a collision with it.
+func TestEnvFilesDir_CannotCollideWithAnInstanceDir(t *testing.T) {
+	root := "/srv/agenda"
+	files, err := EnvFilesDir(root, "app", "prod", false)
+	if err != nil {
+		t.Fatalf("EnvFilesDir: %v", err)
+	}
+	instance, err := ResolveInstanceRunDir(root, "app", "prod", "files", false)
+	if err != nil {
+		t.Fatalf("ResolveInstanceRunDir: %v", err)
+	}
+	if files == instance {
+		t.Fatalf("an instance named %q resolves to the files dir %q", "files", files)
+	}
+}
