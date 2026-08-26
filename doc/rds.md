@@ -34,16 +34,39 @@ attempt.
 
 ### The node does not connect from 127.0.0.1
 
-A containerized node reaches the host through the Docker bridge, so the
-connection arrives at MySQL from a bridge address (`172.17.0.0/16` by default),
-not from loopback. A database account created as `'agenda_ro'@'localhost'` will
-be refused with `Access denied`.
+A containerized node reaches the host through a Docker bridge, so the connection
+arrives at MySQL from a bridge address, not from loopback. An account created as
+`'agenda_ro'@'localhost'` is refused with `Access denied`.
 
-Grant to the bridge range instead:
+**Do not guess which address.** `172.17.0.0/16` is only the stock Linux default.
+Docker Desktop, and any daemon with custom `default-address-pools`, hands out
+something else — `192.168.x` is common — and an account scoped to the wrong
+range fails exactly like a wrong password.
+
+Create the account with the `%` wildcard, connect once, then let MySQL tell you
+where the connection came from:
 
 ```sql
-CREATE USER 'agenda_ro'@'172.17.0.%' IDENTIFIED BY '<a strong random password>';
+CREATE USER 'agenda_ro'@'%' IDENTIFIED BY '<a strong random password>';
+GRANT SELECT, SHOW VIEW ON `app_db`.* TO 'agenda_ro'@'%';
 ```
+
+Register the instance, press **Test**, and read the real source address:
+
+```sql
+SELECT user, host FROM information_schema.processlist WHERE user = 'agenda_ro';
+```
+
+Then narrow the account to that subnet. `RENAME USER` carries the grants across,
+so nothing needs re-granting:
+
+```sql
+RENAME USER 'agenda_ro'@'%' TO 'agenda_ro'@'192.168.128.%';
+```
+
+MySQL's host part takes `%` and `_` as wildcards — there is no `*`, and a host
+written as `'*'` matches nothing at all. When you know the subnet, a netmask is
+more precise than a wildcard: `'agenda_ro'@'192.168.128.0/255.255.255.0'`.
 
 If you instead run agenda-node bare-metal under systemd
 (`cmd/agenda-node/agenda-node.service`), the connection does come from
@@ -52,7 +75,14 @@ If you instead run agenda-node bare-metal under systemd
 ### MySQL must listen on the bridge as well as loopback
 
 With `bind-address = 127.0.0.1`, a containerized node cannot reach MySQL at all.
-MySQL 8.0.13+ accepts a list:
+It also has to listen on the bridge gateway. Find that address rather than
+assuming it:
+
+```bash
+docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'
+```
+
+MySQL 8.0.13+ accepts a list (substitute the gateway you just found):
 
 ```ini
 [mysqld]
@@ -63,8 +93,9 @@ The external interface is still not listening, so this does not undo the point
 of the exercise.
 
 If MySQL itself runs as a container on that machine, the same applies to how its
-port is published: `127.0.0.1:3306:3306` is unreachable from the node, and
-`172.17.0.1:3306:3306` works.
+port is published: `127.0.0.1:3306:3306` is unreachable from the node, while
+binding it to the bridge gateway — `172.17.0.1:3306:3306`, again substituting
+your own — works.
 
 ## The read-only account
 
@@ -87,13 +118,15 @@ them in different places. That is what decides whether new tables are covered:
 So grant at the database level:
 
 ```sql
-CREATE USER 'agenda_ro'@'172.17.0.%' IDENTIFIED BY '<a strong random password>';
+-- Host scoping: start with '%' and narrow it once you know the real source
+-- address (see "The node does not connect from 127.0.0.1" above).
+CREATE USER 'agenda_ro'@'%' IDENTIFIED BY '<a strong random password>';
 
 -- Covers every table in the schema, including ones that do not exist yet.
-GRANT SELECT, SHOW VIEW ON `app_db`.* TO 'agenda_ro'@'172.17.0.%';
+GRANT SELECT, SHOW VIEW ON `app_db`.* TO 'agenda_ro'@'%';
 
 -- One bad query should not be able to exhaust the connection pool.
-ALTER USER 'agenda_ro'@'172.17.0.%'
+ALTER USER 'agenda_ro'@'%'
   WITH MAX_USER_CONNECTIONS 5
        MAX_QUERIES_PER_HOUR 20000;
 ```
@@ -104,7 +137,7 @@ plain `SELECT` is enough to run queries.
 To cover every schema, including ones created later, grant globally:
 
 ```sql
-GRANT SELECT, SHOW VIEW ON *.* TO 'agenda_ro'@'172.17.0.%';
+GRANT SELECT, SHOW VIEW ON *.* TO 'agenda_ro'@'%';
 ```
 
 That also exposes `mysql` (where the password hashes live) and `sys`. On MySQL
@@ -112,9 +145,9 @@ That also exposes `mysql` (where the password hashes live) and `sys`. On MySQL
 
 ```sql
 SET PERSIST partial_revokes = ON;
-REVOKE SELECT ON `mysql`.*              FROM 'agenda_ro'@'172.17.0.%';
-REVOKE SELECT ON `sys`.*                FROM 'agenda_ro'@'172.17.0.%';
-REVOKE SELECT ON `performance_schema`.* FROM 'agenda_ro'@'172.17.0.%';
+REVOKE SELECT ON `mysql`.*              FROM 'agenda_ro'@'%';
+REVOKE SELECT ON `sys`.*                FROM 'agenda_ro'@'%';
+REVOKE SELECT ON `performance_schema`.* FROM 'agenda_ro'@'%';
 ```
 
 `partial_revokes` is a server-wide switch that cannot be turned off again while
@@ -133,7 +166,7 @@ global form.
 ### Check it
 
 ```sql
-SHOW GRANTS FOR 'agenda_ro'@'172.17.0.%';
+SHOW GRANTS FOR 'agenda_ro'@'%';
 ```
 
 Expect only `GRANT USAGE ON *.*` and the schema grant. Then connect as that user

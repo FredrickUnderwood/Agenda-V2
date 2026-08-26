@@ -55,7 +55,9 @@ statements.
 
 **2. Keep the database bound to loopback and the container bridge only.** The
 node agent connects to `<proxy_backend_host>:<port>` on its own machine. Nothing
-needs to reach the database port from outside the host — do not publish it.
+needs to reach the database port from outside the host — do not publish it. A
+containerized node connects from a bridge address rather than loopback; find
+which one rather than assuming it, and scope the account to that subnet.
 
 **3. Set `security.master_key`.** Database passwords and stored query results are
 encrypted at rest with this key. Without it they are written to the
