@@ -59,6 +59,17 @@ export function MachineFilesDrawer({
   const [overwrite, setOverwrite] = useState(false)
 
   const machineId = machine?.id ?? 0
+  // Every upload has to land inside the machine's workspace root. agenda-node
+  // usually runs in a container with only that tree bind-mounted from the host,
+  // so a write anywhere else goes into the node's own container: it reports
+  // success, verifies as OK, and is gone at the next node restart. Presenting
+  // the root as a fixed prefix means the path cannot be wrong to begin with.
+  const root = (machine?.effective_workspace_root ?? '').replace(/\/+$/, '')
+  const relative = targetPath.replace(/^\/+/, '')
+  const absolutePath = relative ? `${root}/${relative}` : ''
+  const relativeError = relative.split('/').includes('..')
+    ? "Path segments may not be '..'."
+    : null
   const queryKey = ['machines', machineId, 'files']
   const { data, isLoading } = useQuery({
     queryKey,
@@ -70,7 +81,7 @@ export function MachineFilesDrawer({
 
   const uploadMutation = useMutation({
     mutationFn: () =>
-      api.uploadMachineFile(machineId, { path: targetPath.trim(), file: selected as File, mode, overwrite }),
+      api.uploadMachineFile(machineId, { path: absolutePath, file: selected as File, mode, overwrite }),
     onSuccess: (rec) => {
       message.success(`Uploaded to ${rec.path}`)
       setFileList([])
@@ -120,18 +131,29 @@ export function MachineFilesDrawer({
           <p className="ant-upload-text">Click or drag a file here</p>
         </Upload.Dragger>
 
-        <Input
-          className="agenda-mono"
-          addonBefore="Path"
-          value={targetPath}
-          placeholder="/root/.agenda-v2/workspaces/shared/ca.pem"
-          onChange={(e) => setTargetPath(e.target.value)}
-        />
-        <Typography.Text type="secondary">
-          Absolute path on the machine. agenda-node may confine uploads to its configured{' '}
-          <Typography.Text className="agenda-mono">file_roots</Typography.Text>; a containerized node
-          only sees paths bind-mounted from the host.
-        </Typography.Text>
+        {root ? (
+          <>
+            <Input
+              className="agenda-mono"
+              addonBefore={`${root}/`}
+              value={relative}
+              status={relativeError ? 'error' : undefined}
+              placeholder="shared/ca.pem"
+              onChange={(e) => setTargetPath(e.target.value)}
+            />
+            <Typography.Text type={relativeError ? 'danger' : 'secondary'}>
+              {relativeError ??
+                "Relative to the machine's workspace root. Uploads outside it are refused: a containerized agenda-node would write them inside its own container, where they look fine and disappear on restart."}
+            </Typography.Text>
+          </>
+        ) : (
+          <Alert
+            type="error"
+            showIcon
+            message="This machine has no workspace root"
+            description="Set workspace_root on the machine (or globally in agenda-v2.yaml) before uploading — without it there is no directory agenda is entitled to write to here."
+          />
+        )}
 
         <Space>
           <Input
@@ -147,7 +169,7 @@ export function MachineFilesDrawer({
           </Checkbox>
           <Button
             type="primary"
-            disabled={!selected || !targetPath.trim()}
+            disabled={!selected || !relative || !root || relativeError !== null}
             loading={uploadMutation.isPending}
             onClick={() => uploadMutation.mutate()}
           >

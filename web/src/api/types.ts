@@ -192,6 +192,10 @@ export interface Machine {
   auth_type: AuthType
   ssh_key_path?: string
   workspace_root: string
+  // Resolved against the global config's workspace_root when the machine does
+  // not set its own. This is the only directory agenda may write to on the
+  // machine, and the fixed prefix of any upload path.
+  effective_workspace_root: string
   mode: MachineMode
   agent_base_url: string
   agent_proxy_base_url: string

@@ -90,6 +90,7 @@ func main() {
 
 	machineSvc := service.NewMachineService(machineRepo, secretBox)
 	machineSvc.SetAgentPollInterval(cfg.Deploy.AgentPollInterval.Duration)
+	machineSvc.SetDefaultWorkspaceRoot(cfg.WorkspaceRoot)
 	appSvc := service.NewApplicationService(appRepo, appTargetRepo, appGatewayRouteRepo, appGatewayRouteBackendRepo, machineRepo, appHealthRepo)
 	// Health probes to agent-mode machines are relayed through the node, which
 	// needs the decrypted agent token — so pass machineSvc (Get decrypts), not
@@ -108,7 +109,7 @@ func main() {
 	// File uploads reach machines through the same runner abstraction deploys
 	// use, so they work for agent and SSH machines alike; machineSvc is passed
 	// (not the repo) because an agent-mode transfer needs the decrypted token.
-	machineFileSvc := service.NewMachineFileService(machineFileRepo, appRepo, appTargetRepo, machineSvc, cfg.WorkspaceRoot)
+	machineFileSvc := service.NewMachineFileService(machineFileRepo, appRepo, appTargetRepo, machineSvc)
 	logSvc := service.NewDeployLogService(logRepo, stepRepo)
 	stepSvc := service.NewPipelineStepService(stepRepo)
 	lockSvc := service.NewDeployLockService(rdb)

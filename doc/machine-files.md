@@ -13,7 +13,7 @@ still there, and is it still the same file?*
 
 | | Environment files | Machine upload |
 |---|---|---|
-| Where | `<workspace_root>/run/<app>/<env>/.files/<name>` on every machine in the environment | any absolute path on one machine |
+| Where | `<workspace_root>/run/<app>/<env>/.files/<name>` on every machine in the environment | any path under that machine's workspace root |
 | Mounted into containers | yes, read-only at `/agenda/files` | no |
 | Who can | anyone who can edit the app's environment | admin only |
 | Use it for | credentials and config an app reads at startup | one-off files unrelated to an app |
@@ -102,6 +102,21 @@ reading a credential at startup must never observe a half-written one.
 The SHA-256 recorded is always the one computed by the machine that now holds
 the file, never by the uploader. That is what makes a later check a comparison
 of two readings of the same disk.
+
+## Why uploads are confined to the workspace root
+
+Both scopes write inside the machine's workspace root — its own `workspace_root`
+when set, otherwise the global one — and a machine upload naming a path outside
+it is refused.
+
+This is not tidiness. `agenda-node` commonly runs in a container with only the
+workspace root bind-mounted from the host, so a write anywhere else lands in the
+node's own container filesystem. That upload *succeeds*: the file is really
+written, a verification really finds it, and the checksum really matches — right
+up until the node restarts and it is gone, having never been visible to the host
+or to any app container. A file that appears to exist and does not is worse than
+a refusal, so the console presents the root as a fixed prefix and the control
+plane rejects anything outside it.
 
 ## Locking the node down
 

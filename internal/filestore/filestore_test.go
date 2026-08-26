@@ -141,3 +141,27 @@ func TestParseMode(t *testing.T) {
 		t.Errorf("FormatMode(0640) = %s", got)
 	}
 }
+
+// WithinRoot is the check applied to a path on *another* machine, so it must be
+// purely textual — and must not be fooled by a sibling directory whose name
+// merely starts with the root's.
+func TestWithinRoot(t *testing.T) {
+	const root = "/srv/agenda"
+	inside := []string{"/srv/agenda", "/srv/agenda/run/app/prod/.files/key.p8", "/srv/agenda/x"}
+	for _, p := range inside {
+		if !WithinRoot(p, root) {
+			t.Errorf("WithinRoot(%q, %q) = false, want true", p, root)
+		}
+	}
+	outside := []string{"/tmp/key.p8", "/srv/agenda-evil/x", "/srv", "/srv/agendaX", "/etc/passwd"}
+	for _, p := range outside {
+		if WithinRoot(p, root) {
+			t.Errorf("WithinRoot(%q, %q) = true, want false", p, root)
+		}
+	}
+	// An unconfigured root confines nothing, so it must not accidentally admit
+	// everything.
+	if WithinRoot("/anything", "") {
+		t.Error("WithinRoot with an empty root accepted a path")
+	}
+}

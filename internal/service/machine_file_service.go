@@ -29,6 +29,11 @@ var ErrNoMachinesForEnv = errors.New("this environment has no enabled instances,
 // ErrMachineFileNotFound covers "no such upload record".
 var ErrMachineFileNotFound = errors.New("file record not found")
 
+// ErrNoWorkspaceRoot is returned when a machine has no workspace root, its own
+// or inherited. Without one there is no directory agenda is entitled to write
+// to on that machine, so an upload has nowhere legitimate to go.
+var ErrNoWorkspaceRoot = errors.New("this machine has no workspace_root configured, so there is no directory agenda may upload into")
+
 // fileNamePattern constrains the name of an app-environment file. The name
 // becomes a path component on every machine in the environment and a filename
 // inside every container, so it is restricted to what is unambiguous in both:
@@ -45,11 +50,10 @@ type FileOpener func() (io.ReadCloser, error)
 // abstraction deploys use, and records what it wrote so the console can later
 // ask whether the file is still there and still unchanged.
 type MachineFileService struct {
-	files         *repository.MachineFileRepository
-	apps          *repository.ApplicationRepository
-	targets       *repository.ApplicationTargetRepository
-	machines      *MachineService
-	workspaceRoot string
+	files    *repository.MachineFileRepository
+	apps     *repository.ApplicationRepository
+	targets  *repository.ApplicationTargetRepository
+	machines *MachineService
 }
 
 func NewMachineFileService(
@@ -57,9 +61,8 @@ func NewMachineFileService(
 	apps *repository.ApplicationRepository,
 	targets *repository.ApplicationTargetRepository,
 	machines *MachineService,
-	workspaceRoot string,
 ) *MachineFileService {
-	return &MachineFileService{files: files, apps: apps, targets: targets, machines: machines, workspaceRoot: workspaceRoot}
+	return &MachineFileService{files: files, apps: apps, targets: targets, machines: machines}
 }
 
 // UploadResult is the per-machine outcome of one upload. An environment upload
@@ -135,8 +138,15 @@ func (s *MachineFileService) UploadToAppEnv(
 	return results, nil
 }
 
-// UploadToMachine writes one file to an operator-chosen absolute path on one
-// machine. Nothing mounts the result anywhere — see domain.FileScopeMachine.
+// UploadToMachine writes one file to an operator-chosen path on one machine.
+// Nothing mounts the result anywhere — see domain.FileScopeMachine.
+//
+// The path must be inside the machine's workspace root. That is not tidiness:
+// agenda-node commonly runs in a container with only the workspace root
+// bind-mounted from the host, so a write anywhere else lands inside the node's
+// own container, reports success, verifies as OK, and vanishes on the next node
+// restart — a file that appears to exist and does not. Refusing the path
+// outright is the only outcome that is not a lie.
 func (s *MachineFileService) UploadToMachine(
 	ctx context.Context,
 	p Principal,
@@ -155,6 +165,13 @@ func (s *MachineFileService) UploadToMachine(
 	m, err := s.machines.Get(ctx, machineID)
 	if err != nil {
 		return nil, err
+	}
+	root := s.machines.EffectiveWorkspaceRoot(m)
+	if root == "" {
+		return nil, ErrNoWorkspaceRoot
+	}
+	if !filestore.WithinRoot(clean, root) {
+		return nil, fmt.Errorf("%w: %s is outside %s", filestore.ErrOutsideRoots, clean, root)
 	}
 	return s.upload(ctx, p, m, clean, path.Base(clean), mode, overwrite, open, func(f *domain.MachineFile) {
 		f.Scope = domain.FileScopeMachine
@@ -236,16 +253,16 @@ func (s *MachineFileService) envMachines(ctx context.Context, appID int64, env d
 	return out, nil
 }
 
-// envFilesDir resolves the managed file directory for (app, env) on a machine,
-// using the machine's own workspace root when it has one — the same precedence
-// the deploy pipeline applies, so the upload and the bind mount always agree.
+// envFilesDir resolves the managed file directory for (app, env) on a machine.
+// The root comes from MachineService so it matches what the console shows and
+// what UploadToMachine enforces; the deploy pipeline applies the same
+// precedence, so the upload and the bind mount always agree.
 func (s *MachineFileService) envFilesDir(m *domain.Machine, appName string, env domain.Environment) (string, error) {
-	mc := ToMachineConfig(m)
-	root := mc.WorkspaceRoot
+	root := s.machines.EffectiveWorkspaceRoot(m)
 	if root == "" {
-		root = s.workspaceRoot
+		return "", ErrNoWorkspaceRoot
 	}
-	return git.EnvFilesDir(root, appName, string(env), mc.IsLocal())
+	return git.EnvFilesDir(root, appName, string(env), ToMachineConfig(m).IsLocal())
 }
 
 // ContainerPath is where a file uploaded under FileScopeAppEnv appears inside

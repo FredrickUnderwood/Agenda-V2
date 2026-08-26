@@ -167,6 +167,7 @@ func machineFileStatus(err error) int {
 	case errors.Is(err, filestore.ErrTooLarge):
 		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, service.ErrNoMachinesForEnv),
+		errors.Is(err, service.ErrNoWorkspaceRoot),
 		errors.Is(err, filestore.ErrPathInvalid),
 		errors.Is(err, filestore.ErrOutsideRoots),
 		errors.Is(err, filestore.ErrIsDir):

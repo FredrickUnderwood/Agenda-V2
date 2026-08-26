@@ -39,6 +39,9 @@ type MachineService struct {
 	machines          MachineRepo
 	box               *secret.Box
 	agentPollInterval time.Duration
+	// defaultWorkspaceRoot is the global config's workspace root, used for
+	// machines that do not override it. See EffectiveWorkspaceRoot.
+	defaultWorkspaceRoot string
 }
 
 func NewMachineService(machines MachineRepo, box *secret.Box) *MachineService {
@@ -52,6 +55,27 @@ func (s *MachineService) encryptAgentToken(token string) (string, error) {
 		logger.L().Warn("storing machine agent_token without encryption; set security.master_key to encrypt it at rest")
 	}
 	return s.box.Encrypt(token)
+}
+
+// SetDefaultWorkspaceRoot wires the global config's workspace_root, the
+// fallback for machines that do not set their own.
+func (s *MachineService) SetDefaultWorkspaceRoot(root string) {
+	s.defaultWorkspaceRoot = root
+}
+
+// EffectiveWorkspaceRoot is the directory tree agenda owns on a machine: the
+// machine's own workspace_root when set, otherwise the global one. Empty means
+// neither is configured, and nothing that needs a path on that machine can
+// proceed.
+//
+// It is the single answer to "where is agenda allowed to write on this
+// machine", shared by the API view the console renders and by the upload path
+// that enforces it — two places that must not be able to disagree.
+func (s *MachineService) EffectiveWorkspaceRoot(m *domain.Machine) string {
+	if m != nil && m.WorkspaceRoot != "" {
+		return m.WorkspaceRoot
+	}
+	return s.defaultWorkspaceRoot
 }
 
 // SetAgentPollInterval wires the global deploy.agent_poll_interval so
@@ -377,10 +401,19 @@ func (s *MachineService) ToMachineConfig(m *domain.Machine) *config.MachineConfi
 type MachineView struct {
 	*domain.Machine
 	Online bool `json:"online"`
+	// EffectiveWorkspaceRoot resolves the machine's own workspace_root against
+	// the global fallback. The console needs the resolved value: it presents it
+	// as the fixed prefix of any path an operator can upload to, and only the
+	// server knows what the fallback is.
+	EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
 }
 
-func toView(m *domain.Machine) MachineView {
-	return MachineView{Machine: m, Online: m.Online(heartbeatInterval)}
+func (s *MachineService) toView(m *domain.Machine) MachineView {
+	return MachineView{
+		Machine:                m,
+		Online:                 m.Online(heartbeatInterval),
+		EffectiveWorkspaceRoot: s.EffectiveWorkspaceRoot(m),
+	}
 }
 
 // ListViews returns machines with their derived online status for the API.
@@ -391,7 +424,7 @@ func (s *MachineService) ListViews(ctx context.Context) ([]MachineView, error) {
 	}
 	views := make([]MachineView, 0, len(machines))
 	for _, m := range machines {
-		views = append(views, toView(m))
+		views = append(views, s.toView(m))
 	}
 	return views, nil
 }
@@ -402,5 +435,5 @@ func (s *MachineService) GetView(ctx context.Context, id int64) (MachineView, er
 	if err != nil {
 		return MachineView{}, err
 	}
-	return toView(m), nil
+	return s.toView(m), nil
 }

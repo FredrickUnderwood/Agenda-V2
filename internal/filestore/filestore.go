@@ -93,6 +93,25 @@ func ValidatePath(path string, roots []string) (string, error) {
 	return "", ErrOutsideRoots
 }
 
+// WithinRoot reports whether path lies inside root, comparing the two purely
+// as text.
+//
+// It exists alongside ValidatePath for paths on *another* machine. ValidatePath
+// resolves symlinks, which is what makes its confinement real — but only for
+// the filesystem it is running on. Applying it to a remote machine's path would
+// resolve that path against the control plane's own filesystem, answering a
+// question about the wrong host. Both callers exist: the control plane uses this
+// to reject an obviously wrong destination early, and the node applies the real
+// check on the machine that will hold the file.
+func WithinRoot(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
 // deepestRealPath resolves symlinks over the longest existing prefix of path
 // and re-appends the part that does not exist yet, so an upload to a not-yet-
 // created file still gets its parent directories resolved.
