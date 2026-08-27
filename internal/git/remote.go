@@ -265,6 +265,32 @@ func InstanceLogDir(root, app, env, instance string, expandTilde bool) (string, 
 	return filepath.Join(runDir, "logs"), nil
 }
 
+// envFilesSubdir is the fixed subdirectory holding an application
+// environment's platform-managed files. The leading dot keeps it out of the
+// instance-name namespace it shares a parent with: an instance name is slugged
+// to ^[a-z0-9][a-z0-9-]*$, so no instance directory can ever collide with it.
+const envFilesSubdir = ".files"
+
+// EnvFilesDir is the on-machine directory holding files uploaded for one
+// (app, env): <root>/run/<app>/<env>/.files.
+//
+// It is scoped to the environment rather than to a single instance because the
+// files are credentials and configuration the whole environment shares — blue
+// and green must read the same key, and giving each instance its own copy would
+// only create a way for them to drift apart. It sits outside the code checkout
+// for the same reason InstanceLogDir does: a re-clone (or the rm -rf fallback in
+// Pull) must not be able to delete it.
+func EnvFilesDir(root, app, env string, expandTilde bool) (string, error) {
+	root, err := resolveWorkspaceRoot(root, expandTilde)
+	if err != nil {
+		return "", err
+	}
+	if app == "" {
+		return "", errors.New("app is empty")
+	}
+	return filepath.Join(root, runSubtree, util.Slug(app), util.Slug(env), envFilesSubdir), nil
+}
+
 // resolveWorkspaceRoot validates the configured workspace root and expands a
 // leading "~" against the controller's HOME when expandTilde is set (local
 // execution only — remote machines must use absolute paths, since ~ would

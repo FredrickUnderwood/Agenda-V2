@@ -5,11 +5,17 @@ ENV GOPROXY=https://goproxy.cn,direct \
     GOSUMDB=off \
     CGO_ENABLED=0
 WORKDIR /src
+# The cache mounts below persist GOMODCACHE and GOCACHE across builds, which
+# the layer cache cannot do: `COPY . .` sits above `go build`, so any source
+# change invalidates it and every dependency gets recompiled from scratch.
 COPY go.mod go.sum ./
 COPY sdk/go/go.mod sdk/go/go.sum ./sdk/go/
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY . .
-RUN go build -ldflags="-s -w" -o /out/agenda-gateway ./cmd/agenda-gateway
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags="-s -w" -o /out/agenda-gateway ./cmd/agenda-gateway
 
 FROM alpine:3.20
 # ca-certificates is required for outbound ACME (ZeroSSL) TLS when edge TLS is on.

@@ -192,6 +192,10 @@ export interface Machine {
   auth_type: AuthType
   ssh_key_path?: string
   workspace_root: string
+  // Resolved against the global config's workspace_root when the machine does
+  // not set its own. This is the only directory agenda may write to on the
+  // machine, and the fixed prefix of any upload path.
+  effective_workspace_root: string
   mode: MachineMode
   agent_base_url: string
   agent_proxy_base_url: string
@@ -352,6 +356,51 @@ export interface NodeLogsResponse {
   logs: NodeLogFile[]
 }
 
+export type FileScope = 'app_env' | 'machine'
+export type FileVerifyStatus = '' | 'ok' | 'changed' | 'missing' | 'unreachable'
+
+// One upload of one file to one machine. Uploads append rows rather than
+// replacing them, so a list is a history; `current` marks the row that
+// describes what is on disk now.
+export interface MachineFile {
+  id: number
+  scope: FileScope
+  application_id: number
+  app_name: string
+  env: Environment | ''
+  machine_id: number
+  machine_name: string
+  path: string
+  file_name: string
+  size: number
+  sha256: string
+  mode: string
+  user_id: number
+  username: string
+  created_at: string
+  last_verified_at: string | null
+  last_verify_status: FileVerifyStatus
+  last_verify_sha256: string
+  last_verify_error: string
+  current: boolean
+}
+
+// An environment upload reaches several machines and any of them can fail on
+// its own, so the response reports each separately.
+export interface FileUploadResult {
+  machine_id: number
+  machine_name: string
+  path: string
+  success: boolean
+  error?: string
+  file?: MachineFile
+}
+
+export interface UploadEnvFileResponse {
+  data: FileUploadResult[]
+  container_path: string
+}
+
 export interface ListResponse<T> {
   data: T[]
   total: number
@@ -409,4 +458,121 @@ export interface AlertRuleTestResult {
   firing: boolean
   result?: unknown
   error?: string
+}
+
+export type DatabaseEngine = 'mysql' | 'redis'
+
+// A registered database always lives on its machine — there is no host field.
+// agenda-node connects to it locally, so the port is never published.
+export interface DatabaseInstance {
+  id: number
+  name: string
+  engine: DatabaseEngine
+  machine_id: number
+  port: number
+  username: string
+  default_database: string
+  env: Environment
+  description: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateDatabaseInstanceRequest {
+  name: string
+  engine?: DatabaseEngine
+  machine_id: number
+  port: number
+  username: string
+  password?: string
+  default_database?: string
+  env?: Environment
+  description?: string
+  enabled?: boolean
+}
+
+export type UpdateDatabaseInstanceRequest = Partial<CreateDatabaseInstanceRequest>
+
+export interface DatabaseColumn {
+  name: string
+  type: string
+  // Set when the column held bytes that are not valid UTF-8; those cells are
+  // base64-encoded rather than shown raw.
+  binary: boolean
+}
+
+// A cell is null for SQL NULL, which is deliberately distinct from ''.
+export type DatabaseCell = string | null
+
+export interface QueryResult {
+  columns: DatabaseColumn[]
+  rows: DatabaseCell[][]
+  row_count: number
+  truncated: boolean
+  duration_ms: number
+  database: string
+  query_log_id: number
+}
+
+export interface QueryRequest {
+  database?: string
+  sql: string
+  max_rows?: number
+  timeout_ms?: number
+}
+
+// A Redis reply comes back in the same QueryResult shape a SQL result does, so
+// the grid and the history viewer stay one implementation. db is optional
+// because omitting it means "the instance's registered default index" — which
+// 0 does not, 0 being a real index.
+export interface RedisCommandRequest {
+  db?: number
+  command: string
+  max_rows?: number
+  timeout_ms?: number
+}
+
+// How many numeric databases the server has, for the console's DB picker.
+export interface RedisDatabaseCount {
+  count: number
+}
+
+export interface DBQueryLog {
+  id: number
+  instance_id: number
+  instance_name: string
+  env: Environment
+  user_id: number
+  username: string
+  database_name: string
+  statement: string
+  result_truncated: boolean
+  row_count: number
+  duration_ms: number
+  success: boolean
+  error: string
+  created_at: string
+}
+
+// Only a single-entry read carries the stored result; a listing never does.
+export interface DBQueryLogDetail extends DBQueryLog {
+  result?: {
+    columns: DatabaseColumn[]
+    rows: DatabaseCell[][]
+    truncated: boolean
+  }
+}
+
+export interface TestDatabaseInstanceResult {
+  ok: boolean
+  server_version?: string
+  error?: string
+}
+
+// Every table in a schema with its column names, in one call — the shape the
+// editor's completion needs. Best-effort: on a very large schema this can be
+// slow or truncated, and the console degrades to completion without columns.
+export interface SchemaOutline {
+  tables: Record<string, string[]>
 }

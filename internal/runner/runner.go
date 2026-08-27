@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 )
 
 // procGroupWaitDelay bounds how long Cmd.Wait blocks after the context is
@@ -44,6 +46,19 @@ type Runner interface {
 	RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf *bytes.Buffer) error
 	// RunShell runs a raw shell string via sh -c, writing stdout+stderr to buf.
 	RunShell(ctx context.Context, dir, shellCmd string, buf *bytes.Buffer) error
+
+	// PutFile streams src to an absolute path on the runner's machine, creating
+	// parent directories as needed, and reports what ended up on disk. mode is
+	// an octal string ("0600"; empty means contract.DefaultFileMode). Writing is
+	// atomic — readers see either the previous file or the complete new one,
+	// never a partial write. Returns filestore.ErrExists when the path is
+	// already taken and overwrite is false.
+	PutFile(ctx context.Context, path string, src io.Reader, mode string, overwrite bool) (contract.FileStat, error)
+
+	// StatFile describes a file on the runner's machine, including the SHA-256
+	// of its current contents. A missing file is reported as
+	// contract.FileStat{Exists: false}, not as an error.
+	StatFile(ctx context.Context, path string) (contract.FileStat, error)
 }
 
 // New selects the execution backend for a machine: a localRunner when
@@ -123,21 +138,26 @@ func (s *sshRunner) RunShell(ctx context.Context, dir, shellCmd string, buf *byt
 }
 
 func (s *sshRunner) runRemote(ctx context.Context, remoteCmd string, buf *bytes.Buffer) error {
+	return s.runRemoteStdin(ctx, remoteCmd, nil, buf)
+}
+
+// runRemoteStdin is runRemote with an optional stdin stream, which is how
+// PutFile hands the file's bytes to the remote `cat` without ever putting them
+// in the command line (where they would hit the kernel's argv size limit).
+func (s *sshRunner) runRemoteStdin(ctx context.Context, remoteCmd string, stdin io.Reader, buf *bytes.Buffer) error {
 	sshArgs := s.sshArgs()
 	sshArgs = append(sshArgs, remoteCmd)
 
+	var cmd *exec.Cmd
 	if s.machine.Password != "" {
 		// sshpass -e reads the password from SSHPASS so it never appears in argv.
 		args := append([]string{"-e", "ssh"}, sshArgs...)
-		cmd := exec.CommandContext(ctx, "sshpass", args...)
+		cmd = exec.CommandContext(ctx, "sshpass", args...)
 		cmd.Env = append(os.Environ(), "SSHPASS="+s.machine.Password)
-		cmd.Stdout = buf
-		cmd.Stderr = buf
-		hardenProcGroup(cmd)
-		return cmd.Run()
+	} else {
+		cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 	}
-
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
+	cmd.Stdin = stdin
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	hardenProcGroup(cmd)

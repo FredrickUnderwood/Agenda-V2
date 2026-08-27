@@ -177,6 +177,13 @@ central_base_url: "http://control-plane:8080"
 heartbeat_interval: "15s"
 max_output_bytes: 65536
 job_retention: "1h"
+# Confine console file uploads (/v1/files) to the workspace tree. This is the
+# same path bind-mounted host<->container below, so an uploaded file lands on
+# the host where app containers can actually read it — a path outside it would
+# be written inside node's own container and lost on restart.
+file_roots:
+  - "/root/.agenda-v2/workspaces"
+max_upload_bytes: 268435456
 # How long a node restart waits for relayed WebSocket tunnels to close before
 # force-closing them (hijacked connections are invisible to graceful shutdown).
 proxy_drain_timeout: "30s"

@@ -7,11 +7,21 @@ ENV GOPROXY=https://goproxy.cn,direct \
 WORKDIR /src
 # The SDK is a separate in-tree module; copy both module manifests first so the
 # download layer caches independently of source changes.
+#
+# The cache mounts below persist GOMODCACHE and GOCACHE across builds, which
+# the layer cache cannot do: `COPY . .` sits above `go build`, so any source
+# change invalidates it and every dependency gets recompiled from scratch —
+# six minutes of CPU and disk on a small host, for a one-line change. The
+# module cache must be mounted on both steps or this mount would shadow what
+# `go mod download` put there.
 COPY go.mod go.sum ./
 COPY sdk/go/go.mod sdk/go/go.sum ./sdk/go/
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY . .
-RUN go build -ldflags="-s -w" -o /out/agenda-node ./cmd/agenda-node
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags="-s -w" -o /out/agenda-node ./cmd/agenda-node
 
 FROM alpine:3.20
 # agenda-node shells out to git and docker compose to run deployments. When run

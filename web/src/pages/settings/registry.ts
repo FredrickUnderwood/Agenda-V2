@@ -10,6 +10,7 @@ import type { SettingType } from '@/api/types'
 // Keep this in sync with the Go consumers:
 //   - gateway.tls.*      internal/service/gateway_tls_sync_service.go
 //   - observability.*    internal/handler/middleware.go + internal/application/alert_rule_monitor.go
+//   - rds.*              internal/service/database_query_service.go
 // The git.token.* and alert.channel.* namespaces are variable-cardinality
 // (per-host / per-channel) so they get their own dedicated collection editors
 // rather than a fixed field list here.
@@ -142,8 +143,26 @@ export const OBSERVABILITY_SECTION: SettingSectionSpec = {
   ],
 }
 
+export const DATABASES_SECTION: SettingSectionSpec = {
+  id: 'databases',
+  title: 'Databases',
+  description:
+    'Query history keeps a capped copy of what each statement returned, so real database rows live in the control-plane database and its backups. This is how long they are kept.',
+  fields: [
+    {
+      key: 'rds.query_log_retention_days',
+      label: 'Query history retention (days)',
+      input: 'text',
+      type: 'int',
+      secret: false,
+      placeholder: '30',
+      help: 'Entries older than this are deleted hourly. Defaults to 30 days when unset.',
+    },
+  ],
+}
+
 // Sections rendered by the generic FixedSettingsForm. Order = tab order.
-export const FIXED_SECTIONS: SettingSectionSpec[] = [GATEWAY_TLS_SECTION, OBSERVABILITY_SECTION]
+export const FIXED_SECTIONS: SettingSectionSpec[] = [GATEWAY_TLS_SECTION, OBSERVABILITY_SECTION, DATABASES_SECTION]
 
 // Every key owned by a purpose-built editor (fixed sections + the dynamic
 // collections). The Advanced tab surfaces anything NOT in this set / prefix list

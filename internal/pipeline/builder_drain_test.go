@@ -22,7 +22,7 @@ func drainTestBuilder(lister ApplicationTargetLister) *Builder {
 	cfg.Gateway.Enabled = true
 	cfg.Gateway.BaseURL = "http://gw"
 	cfg.Gateway.ServiceToken = "tok"
-	return NewBuilder(cfg, nil, lister, nil)
+	return NewBuilder(cfg, nil, lister, nil, nil)
 }
 
 func drainApp() *domain.Application {
@@ -129,7 +129,7 @@ func TestBuildGatewayDrain_AllEnabledExcludesStoppedKeepsSurvivor(t *testing.T) 
 // deploy without a gateway can still decommission (compose_down alone).
 func TestBuildGatewayDrain_NoGatewayNoStep(t *testing.T) {
 	cfg := &config.Config{} // Gateway.Enabled == false
-	b := NewBuilder(cfg, nil, nil, nil)
+	b := NewBuilder(cfg, nil, nil, nil, nil)
 	target := &domain.DeployTarget{
 		App:    drainApp(),
 		Branch: "master",

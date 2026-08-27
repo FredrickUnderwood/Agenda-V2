@@ -5,6 +5,7 @@ import {
   AppstoreOutlined,
   BellOutlined,
   ClusterOutlined,
+  ConsoleSqlOutlined,
   PartitionOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -20,6 +21,7 @@ const { Sider, Header, Content } = Layout
 const NAV_ITEMS: MenuProps['items'] = [
   { key: '/applications', icon: <AppstoreOutlined />, label: 'Applications' },
   { key: '/machines', icon: <ClusterOutlined />, label: 'Machines' },
+  { key: '/databases', icon: <ConsoleSqlOutlined />, label: 'Databases' },
   { key: '/gateway', icon: <PartitionOutlined />, label: 'Gateway' },
   { key: '/alert-rules', icon: <BellOutlined />, label: 'Alert Rules' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },

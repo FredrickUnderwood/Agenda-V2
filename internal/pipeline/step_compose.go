@@ -7,6 +7,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 )
 
@@ -78,19 +79,36 @@ type ComposeUpStep struct {
 	// the stable (app, env, instance) identity rather than the branch.
 	LogDir string
 
+	// FilesDir is the absolute host path of this environment's platform-managed
+	// file directory (git.EnvFilesDir → <root>/run/<app>/<env>/.files),
+	// bind-mounted read-only onto contract.AgendaContainerFilesDir. Unlike
+	// LogDir it is shared by every instance in the environment.
+	FilesDir string
+
 	// Env is the fully merged env var map (application baseline < env-level
 	// override < instance-level override) baked into the override file.
 	Env map[string]string
+
+	// FileChecker/AppID/MachineID drive the environment-file report written at
+	// the top of Execute. Nil/zero disables it.
+	FileChecker EnvFileChecker
+	AppID       int64
+	MachineID   int64
 }
 
 func (s *ComposeUpStep) Execute(ctx context.Context, rc *RunContext) error {
+	// Report on the environment's uploaded files before anything starts, so a
+	// missing credential is named in the log above the container that will fail
+	// because of it.
+	reportEnvFileState(ctx, s.FileChecker, s.AppID, domain.Environment(s.EnvName), s.MachineID, rc.Output)
+
 	metricsAddr := ""
 	if s.MetricsPort > 0 {
 		metricsAddr = contract.AgendaContainerMetricsAddr
 	}
 	overridePath, err := writeAgendaOverride(
 		ctx, s.Machine,
-		rc.LocalPath, s.ComposeFile, s.WorkDir, s.ProjectName, s.LogDir,
+		rc.LocalPath, s.ComposeFile, s.WorkDir, s.ProjectName, s.LogDir, s.FilesDir,
 		s.AppName, s.Branch, s.EnvName, s.InstanceName, metricsAddr,
 		s.Services,
 		s.Env,

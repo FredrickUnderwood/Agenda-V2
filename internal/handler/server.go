@@ -27,6 +27,9 @@ type Server struct {
 	logSvc               *service.DeployLogService
 	appLogSvc            *service.ApplicationLogService
 	appMetricsSvc        *service.ApplicationMetricsService
+	machineFileSvc       *service.MachineFileService
+	dbInstanceSvc        *service.DatabaseInstanceService
+	dbQuerySvc           *service.DatabaseQueryService
 	settingSvc           *service.SettingService
 	alertSvc             *service.AlertService
 	alertRuleSvc         *service.AlertRuleService
@@ -46,9 +49,12 @@ func NewServer(
 	releaseSvc *service.ApplicationReleaseService,
 	envDeploySvc *service.EnvDeploymentService,
 	machineSvc *service.MachineService,
+	machineFileSvc *service.MachineFileService,
 	logSvc *service.DeployLogService,
 	appLogSvc *service.ApplicationLogService,
 	appMetricsSvc *service.ApplicationMetricsService,
+	dbInstanceSvc *service.DatabaseInstanceService,
+	dbQuerySvc *service.DatabaseQueryService,
 	settingSvc *service.SettingService,
 	alertSvc *service.AlertService,
 	alertRuleSvc *service.AlertRuleService,
@@ -62,7 +68,8 @@ func NewServer(
 	s := &Server{
 		cfg: cfg, engine: gin.New(),
 		appSvc: appSvc, healthSvc: healthSvc, envSvc: envSvc, releaseSvc: releaseSvc, envDeploySvc: envDeploySvc,
-		machineSvc: machineSvc, logSvc: logSvc, appLogSvc: appLogSvc, appMetricsSvc: appMetricsSvc, settingSvc: settingSvc,
+		machineSvc: machineSvc, machineFileSvc: machineFileSvc, logSvc: logSvc, appLogSvc: appLogSvc, appMetricsSvc: appMetricsSvc,
+		dbInstanceSvc: dbInstanceSvc, dbQuerySvc: dbQuerySvc, settingSvc: settingSvc,
 		alertSvc: alertSvc, alertRuleSvc: alertRuleSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 		instanceLifecycleApp: instanceLifecycleApp,
 	}
@@ -142,6 +149,13 @@ func (s *Server) registerRoutes() {
 		apps.POST("/:appID/releases", s.createRelease)
 		apps.GET("/:appID/env-deployments", s.listEnvDeployments)
 		apps.POST("/:appID/env-deployments", s.createEnvDeployment)
+		// Environment files sit at the same trust level as environment
+		// variables, which this group already exposes: both configure an
+		// environment and both routinely carry secrets. Unlike a raw machine
+		// upload, the destination path here is computed by the platform, so no
+		// caller chooses where the bytes land.
+		apps.GET("/:appID/files", s.listApplicationEnvFiles)
+		apps.POST("/:appID/files", s.uploadApplicationEnvFile)
 	}
 
 	envDeployments := v1.Group("/env-deployments")
@@ -171,6 +185,56 @@ func (s *Server) registerRoutes() {
 		machines.DELETE("/:machineID", s.deleteMachine)
 		machines.POST("/:machineID/test", s.testMachineConnection)
 		machines.POST("/:machineID/rotate-token", s.rotateMachineToken)
+		machines.GET("/:machineID/files", s.listMachineFiles)
+	}
+
+	// Uploading to an arbitrary path is the one file route that is genuinely
+	// privilege-granting, so it is admin-only — the same bar the platform
+	// already applies to deploy configuration, whose pre_commands run arbitrary
+	// shell on the same machines.
+	machineAdmin := v1.Group("/machines")
+	machineAdmin.Use(s.requireAdmin())
+	{
+		machineAdmin.POST("/:machineID/files", s.uploadMachineFile)
+	}
+
+	// Re-checking a recorded file is read-only and keyed on the record, so it
+	// is not scoped under either parent.
+	v1.POST("/files/:fileID/verify", s.verifyMachineFile)
+
+	// Reading a registered database and running a statement against it are
+	// gated per instance by its environment (see service.AuthorizeQuery), which
+	// needs the instance row to decide — so that check lives in the service,
+	// not in a route middleware.
+	dbInstances := v1.Group("/db-instances")
+	{
+		dbInstances.GET("", s.listDatabaseInstances)
+		dbInstances.GET("/:instanceID", s.getDatabaseInstance)
+		dbInstances.POST("/:instanceID/query", s.queryDatabaseInstance)
+		dbInstances.GET("/:instanceID/databases", s.listDatabaseInstanceDatabases)
+		dbInstances.GET("/:instanceID/tables", s.listDatabaseInstanceTables)
+		dbInstances.GET("/:instanceID/schema", s.getDatabaseInstanceSchema)
+		dbInstances.POST("/:instanceID/redis/command", s.runRedisCommand)
+		dbInstances.GET("/:instanceID/redis/databases", s.getRedisDatabases)
+	}
+
+	// Registering or editing an instance stores a database password, so those
+	// routes are admin-only for the same reason Settings are.
+	dbInstanceAdmin := v1.Group("/db-instances")
+	dbInstanceAdmin.Use(s.requireAdmin())
+	{
+		dbInstanceAdmin.POST("", s.createDatabaseInstance)
+		dbInstanceAdmin.PUT("/:instanceID", s.updateDatabaseInstance)
+		dbInstanceAdmin.DELETE("/:instanceID", s.deleteDatabaseInstance)
+		dbInstanceAdmin.POST("/:instanceID/test", s.testDatabaseInstance)
+	}
+
+	// The audit trail narrows itself to the caller: a member sees their own
+	// queries, an admin sees everyone's (enforced in the service).
+	dbQueryLogs := v1.Group("/db-query-logs")
+	{
+		dbQueryLogs.GET("", s.listDBQueryLogs)
+		dbQueryLogs.GET("/:logID", s.getDBQueryLog)
 	}
 
 	// Settings hold secrets (tokens) — admin only.

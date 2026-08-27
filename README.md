@@ -58,13 +58,23 @@ frontend + backend apps** on machines *you* control.
 - **Alerting** — a self-built PromQL `AlertRule` engine plus SDK-driven alerts to
   **Feishu / DingTalk / WeCom / Slack / custom webhooks**, every alert also
   landing in a shared in-app notification inbox.
+- **Databases** — register a **MySQL or Redis** on any agent-mode machine and read
+  it from the console: read-only SQL, or read-only Redis commands against a
+  chosen DB index. Both are relayed through `agenda-node`, so the port never has
+  to be published; every statement and command is audited with a capped,
+  encrypted copy of its result. See [doc/rds.md](doc/rds.md).
+- **Files** — upload a credential from the console and have it delivered to every
+  machine running an environment, bind-mounted read-only into the containers at
+  `/agenda/files`. Contents are never stored — only a SHA-256, so the platform can
+  keep checking that the file is still there and still unchanged, and say so
+  before a deploy. See [doc/machine-files.md](doc/machine-files.md).
 - **Built-in identity & secrets** — JWT-based auth for users and service
   principals, and a lightweight internal KMS that encrypts secret Settings at rest
   (AES-256-GCM).
 - **First-party Go SDK** (`sdk/go`) — drop-in `log`, `metric`, and `alert`
   packages so hosted apps integrate with the platform without bespoke glue.
 - **Web console** (`web/`) — a React + Ant Design UI for machines, applications,
-  deploys, routes, logs, monitoring, alert rules, and settings.
+  deploys, routes, logs, monitoring, databases, files, alert rules, and settings.
 
 ## Architecture
 

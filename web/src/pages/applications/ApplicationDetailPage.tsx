@@ -5,6 +5,7 @@ import * as api from '@/api/applications'
 import { color } from '@/theme/tokens'
 import { errorMessage } from '@/utils/errorMessage'
 import { EnvVarsTab } from './EnvVarsTab'
+import { FilesTab } from './FilesTab'
 import { InstancesTab } from './InstancesTab'
 import { MonitoringTab } from './MonitoringTab'
 import { OverviewTab } from './OverviewTab'
@@ -75,6 +76,7 @@ export function ApplicationDetailPage() {
           { key: 'releases', label: 'Deployments', children: <ReleasesTab appId={id} /> },
           { key: 'monitoring', label: 'Monitoring', children: <MonitoringTab serviceName={app.name} /> },
           { key: 'env-vars', label: 'Env vars', children: <EnvVarsTab appId={id} /> },
+          { key: 'files', label: 'Files', children: <FilesTab appId={id} /> },
           { key: 'overview', label: 'Settings', children: <OverviewTab app={app} /> },
         ]}
       />

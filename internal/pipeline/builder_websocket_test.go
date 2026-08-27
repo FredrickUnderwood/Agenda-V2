@@ -29,7 +29,7 @@ func wsTestBuilder(wsDrain time.Duration) *Builder {
 	cfg.Gateway.BaseURL = "http://gw"
 	cfg.Gateway.ServiceToken = "tok"
 	cfg.Gateway.WSDrainTimeout.Duration = wsDrain
-	return NewBuilder(cfg, nil, nil, nil)
+	return NewBuilder(cfg, nil, nil, nil, nil)
 }
 
 func wsTarget(route *domain.ApplicationGatewayRoute) *domain.DeployTarget {

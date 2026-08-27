@@ -56,5 +56,8 @@ func Migrate(db *gorm.DB) error {
 		&domain.User{},
 		&domain.Notification{},
 		&domain.AlertRule{},
+		&domain.DatabaseInstance{},
+		&domain.DBQueryLog{},
+		&domain.MachineFile{},
 	)
 }
