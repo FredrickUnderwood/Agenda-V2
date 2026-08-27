@@ -214,6 +214,8 @@ func (s *Server) registerRoutes() {
 		dbInstances.GET("/:instanceID/databases", s.listDatabaseInstanceDatabases)
 		dbInstances.GET("/:instanceID/tables", s.listDatabaseInstanceTables)
 		dbInstances.GET("/:instanceID/schema", s.getDatabaseInstanceSchema)
+		dbInstances.POST("/:instanceID/redis/command", s.runRedisCommand)
+		dbInstances.GET("/:instanceID/redis/databases", s.getRedisDatabases)
 	}
 
 	// Registering or editing an instance stores a database password, so those

@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import * as api from '@/api/databases'
 import { HistoryTab } from './HistoryTab'
 import { InstancesTab } from './InstancesTab'
+import { RedisConsole } from './RedisConsole'
 import { SqlConsole } from './SqlConsole'
 
 export function DatabasesPage() {
@@ -29,6 +30,11 @@ export function DatabasesPage() {
             key: 'console',
             label: 'SQL console',
             children: <SqlConsole instances={list} loading={instances.isLoading} />,
+          },
+          {
+            key: 'redis',
+            label: 'Redis console',
+            children: <RedisConsole instances={list} loading={instances.isLoading} />,
           },
           {
             key: 'instances',

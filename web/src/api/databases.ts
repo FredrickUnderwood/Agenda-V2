@@ -7,6 +7,8 @@ import type {
   ListResponse,
   QueryRequest,
   QueryResult,
+  RedisCommandRequest,
+  RedisDatabaseCount,
   SchemaOutline,
   TestDatabaseInstanceResult,
   UpdateDatabaseInstanceRequest,
@@ -37,6 +39,18 @@ export function testDatabaseInstance(id: number) {
 // request must outlive that rather than abandoning a query still running.
 export function runQuery(id: number, req: QueryRequest) {
   return apiClient.post<QueryResult>(`/db-instances/${id}/query`, req, { timeout: 90_000 }).then((r) => r.data)
+}
+
+// The Redis half of runQuery, with the same extended budget for the same
+// reason: the server caps a command at 60s and the request must outlive it.
+export function runRedisCommand(id: number, req: RedisCommandRequest) {
+  return apiClient
+    .post<QueryResult>(`/db-instances/${id}/redis/command`, req, { timeout: 90_000 })
+    .then((r) => r.data)
+}
+
+export function getRedisDatabaseCount(id: number) {
+  return apiClient.get<RedisDatabaseCount>(`/db-instances/${id}/redis/databases`).then((r) => r.data)
 }
 
 export function listDatabases(id: number) {

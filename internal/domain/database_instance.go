@@ -3,21 +3,33 @@ package domain
 import "time"
 
 // DatabaseEngine identifies the wire protocol agenda-node speaks to a
-// registered database. Only MySQL is implemented; the field exists so a second
-// engine can be added without a schema change.
+// registered database.
 type DatabaseEngine string
 
 const (
 	DatabaseEngineMySQL DatabaseEngine = "mysql"
+	DatabaseEngineRedis DatabaseEngine = "redis"
 )
 
-func (e DatabaseEngine) Valid() bool { return e == DatabaseEngineMySQL }
+func (e DatabaseEngine) Valid() bool {
+	return e == DatabaseEngineMySQL || e == DatabaseEngineRedis
+}
 
 func DefaultDatabaseEngine(e DatabaseEngine) DatabaseEngine {
 	if e == "" {
 		return DatabaseEngineMySQL
 	}
 	return e
+}
+
+// DefaultPortForEngine is the port to register when the operator did not give
+// one. Each engine has exactly one conventional port, so asking for it would be
+// asking a question whose answer is already known.
+func DefaultPortForEngine(e DatabaseEngine) int {
+	if e == DatabaseEngineRedis {
+		return 6379
+	}
+	return 3306
 }
 
 // DatabaseInstance is a database registered for read-only querying from the
@@ -45,6 +57,10 @@ type DatabaseInstance struct {
 	// exists in memory on its way to the node.
 	Password string `json:"-" gorm:"size:512;not null;default:''"`
 
+	// DefaultDatabase is the schema a MySQL query opens with when the console
+	// does not name one. For Redis it holds the default numeric DB index
+	// ("0"..) as text — one column serving both because it answers the same
+	// question, "which namespace does a statement land in by default".
 	DefaultDatabase string `json:"default_database" gorm:"size:128;not null;default:''"`
 
 	// Env drives who may query this instance (service.AuthorizeQuery): prod and

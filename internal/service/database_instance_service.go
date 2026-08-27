@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
@@ -80,19 +81,25 @@ func (s *DatabaseInstanceService) Create(ctx context.Context, req CreateDatabase
 		Enabled: req.Enabled == nil || *req.Enabled,
 	}
 	if inst.Port == 0 {
-		inst.Port = 3306
+		inst.Port = domain.DefaultPortForEngine(inst.Engine)
 	}
 	if err := s.validate(ctx, inst); err != nil {
 		return nil, err
 	}
-	if req.Password == "" {
+	// A Redis bound to loopback commonly has no requirepass at all, and
+	// demanding one here would only push an operator into inventing a password
+	// the server does not check. MySQL always authenticates, so an empty
+	// password there is a mistake worth catching at registration.
+	if req.Password == "" && inst.Engine != domain.DatabaseEngineRedis {
 		return nil, errors.New("password is required")
 	}
-	enc, err := s.encryptPassword(req.Password)
-	if err != nil {
-		return nil, err
+	if req.Password != "" {
+		enc, err := s.encryptPassword(req.Password)
+		if err != nil {
+			return nil, err
+		}
+		inst.Password = enc
 	}
-	inst.Password = enc
 
 	if err := s.instances.Create(ctx, inst); err != nil {
 		return nil, err
@@ -212,7 +219,7 @@ func (s *DatabaseInstanceService) validate(ctx context.Context, inst *domain.Dat
 		return errors.New("name is required")
 	}
 	if !inst.Engine.Valid() {
-		return fmt.Errorf("unsupported engine %q (only mysql is available)", inst.Engine)
+		return fmt.Errorf("unsupported engine %q (mysql and redis are available)", inst.Engine)
 	}
 	if !inst.Env.Valid() {
 		return fmt.Errorf("invalid env %q", inst.Env)
@@ -220,8 +227,16 @@ func (s *DatabaseInstanceService) validate(ctx context.Context, inst *domain.Dat
 	if inst.Port <= 0 || inst.Port > 65535 {
 		return errors.New("port must be a valid TCP port")
 	}
-	if inst.Username == "" {
+	// Redis authenticates with a password alone unless the server runs ACL
+	// users, so a blank username is the normal case there — it means the
+	// `default` user. MySQL has no equivalent.
+	if inst.Username == "" && inst.Engine != domain.DatabaseEngineRedis {
 		return errors.New("username is required")
+	}
+	if inst.Engine == domain.DatabaseEngineRedis && inst.DefaultDatabase != "" {
+		if n, err := strconv.Atoi(inst.DefaultDatabase); err != nil || n < 0 {
+			return fmt.Errorf("default database for Redis must be a numeric index, got %q", inst.DefaultDatabase)
+		}
 	}
 	if inst.MachineID <= 0 {
 		return errors.New("machine_id is required")

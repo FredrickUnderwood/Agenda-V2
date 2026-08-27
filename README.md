@@ -58,10 +58,11 @@ frontend + backend apps** on machines *you* control.
 - **Alerting** — a self-built PromQL `AlertRule` engine plus SDK-driven alerts to
   **Feishu / DingTalk / WeCom / Slack / custom webhooks**, every alert also
   landing in a shared in-app notification inbox.
-- **Databases** — register a database on any agent-mode machine and run read-only
-  SQL against it from the console. Queries are relayed through `agenda-node`, so
-  the database port never has to be published; every statement is audited with a
-  capped, encrypted copy of its result. See [doc/rds.md](doc/rds.md).
+- **Databases** — register a **MySQL or Redis** on any agent-mode machine and read
+  it from the console: read-only SQL, or read-only Redis commands against a
+  chosen DB index. Both are relayed through `agenda-node`, so the port never has
+  to be published; every statement and command is audited with a capped,
+  encrypted copy of its result. See [doc/rds.md](doc/rds.md).
 - **Files** — upload a credential from the console and have it delivered to every
   machine running an environment, bind-mounted read-only into the containers at
   `/agenda/files`. Contents are never stored — only a SHA-256, so the platform can

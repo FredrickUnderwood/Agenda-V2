@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/redisguard"
 	"github.com/FredrickUnderwood/agenda-v2/internal/runner"
 	"github.com/FredrickUnderwood/agenda-v2/internal/sqlguard"
 )
@@ -89,6 +90,7 @@ func (s *Server) registerRoutes() {
 		v1.GET("/metrics/:app/:instance", s.getMetrics)
 		v1.GET("/probe/:app/:instance", s.probe)
 		v1.POST("/db/query", s.dbQuery)
+		v1.POST("/redis/command", s.redisCommand)
 		v1.POST("/files", s.putFile)
 		v1.GET("/files/stat", s.statFile)
 	}
@@ -123,6 +125,34 @@ func (s *Server) dbQuery(c *gin.Context) {
 		// carrying the database's own failure — same convention as probe. It
 		// lets the control plane tell "node down" from "database down".
 		c.JSON(http.StatusOK, contract.NodeDBQueryResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// redisCommand is dbQuery's Redis counterpart: one read-only command against a
+// Redis on this machine, re-validated here because a guard that only runs on
+// the caller's side guards nothing.
+func (s *Server) redisCommand(c *gin.Context) {
+	var req contract.NodeRedisCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := clampRedisCommandRequest(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := runLocalRedisCommand(c.Request.Context(), s.backendHost, req)
+	if err != nil {
+		if errors.Is(err, redisguard.ErrRejected) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Reachable node, failed command — a 200 carrying Redis's own error, so
+		// the control plane can still tell "node down" from "Redis down".
+		c.JSON(http.StatusOK, contract.NodeRedisCommandResponse{Error: err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

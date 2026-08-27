@@ -14,7 +14,9 @@ import { SqlEditor } from './SqlEditor'
 const SYSTEM_SCHEMAS = new Set(['information_schema', 'performance_schema', 'mysql', 'sys'])
 
 export function SqlConsole({ instances, loading }: { instances: DatabaseInstance[]; loading: boolean }) {
-  const runnable = useMemo(() => instances.filter((i) => i.enabled), [instances])
+  // A Redis registration is queried from the Redis console; the server refuses
+  // a statement aimed at one, so it must not be offered here.
+  const runnable = useMemo(() => instances.filter((i) => i.enabled && i.engine !== 'redis'), [instances])
   const [instanceId, setInstanceId] = useState<number | undefined>()
   const [database, setDatabase] = useState<string | undefined>()
   const [sql, setSql] = useState('')

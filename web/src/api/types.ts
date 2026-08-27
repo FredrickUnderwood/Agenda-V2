@@ -460,7 +460,7 @@ export interface AlertRuleTestResult {
   error?: string
 }
 
-export type DatabaseEngine = 'mysql'
+export type DatabaseEngine = 'mysql' | 'redis'
 
 // A registered database always lives on its machine — there is no host field.
 // agenda-node connects to it locally, so the port is never published.
@@ -520,6 +520,22 @@ export interface QueryRequest {
   sql: string
   max_rows?: number
   timeout_ms?: number
+}
+
+// A Redis reply comes back in the same QueryResult shape a SQL result does, so
+// the grid and the history viewer stay one implementation. db is optional
+// because omitting it means "the instance's registered default index" — which
+// 0 does not, 0 being a real index.
+export interface RedisCommandRequest {
+  db?: number
+  command: string
+  max_rows?: number
+  timeout_ms?: number
+}
+
+// How many numeric databases the server has, for the console's DB picker.
+export interface RedisDatabaseCount {
+  count: number
 }
 
 export interface DBQueryLog {

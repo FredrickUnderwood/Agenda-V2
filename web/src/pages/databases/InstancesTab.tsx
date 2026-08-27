@@ -10,6 +10,21 @@ import { errorMessage } from '@/utils/errorMessage'
 
 const ENV_COLOR: Record<string, string> = { prod: 'red', stage: 'orange', test: 'blue' }
 
+// Each engine has one conventional port, so picking the engine fills it in.
+const DEFAULT_PORT: Record<string, number> = { mysql: 3306, redis: 6379 }
+
+// The password field means something slightly different per engine, and on an
+// edit it means "leave it alone" for both.
+function passwordHint(editing: boolean, isRedis: boolean) {
+  if (editing) {
+    return 'Leave blank to keep the stored password.'
+  }
+  if (isRedis) {
+    return 'Leave blank if the server has no requirepass. Use an ACL user limited to reads (+@read) where there is one — that is what actually keeps this read-only.'
+  }
+  return 'Use an account with SELECT and nothing else — that grant is what actually keeps this read-only.'
+}
+
 export function InstancesTab({ instances, loading }: { instances: DatabaseInstance[]; loading: boolean }) {
   const { message } = App.useApp()
   const { user } = useAuth()
@@ -19,6 +34,12 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
   const [form] = Form.useForm<CreateDatabaseInstanceRequest>()
 
   const isAdmin = user?.role === 'admin'
+
+  // What the form asks for depends on the engine: Redis has a numeric DB index
+  // rather than a schema, and authenticates with a password alone unless the
+  // server runs ACL users.
+  const engine = Form.useWatch('engine', form) ?? 'mysql'
+  const isRedis = engine === 'redis'
 
   // Queries are relayed through agenda-node, so a machine without one cannot
   // host a registered database. Filtering here means an operator never picks a
@@ -46,19 +67,25 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
 
+  // Keyed on the instance rather than its id so the result can name the engine
+  // it just reached.
   const testMutation = useMutation({
-    mutationFn: (id: number) => api.testDatabaseInstance(id),
-    onSuccess: (res) =>
-      res.ok
-        ? message.success(`Connected${res.server_version ? ` to MySQL ${res.server_version}` : ''}.`)
-        : message.error(res.error ?? 'Could not connect.'),
+    mutationFn: (inst: DatabaseInstance) => api.testDatabaseInstance(inst.id),
+    onSuccess: (res, inst) => {
+      if (!res.ok) {
+        message.error(res.error ?? 'Could not connect.')
+        return
+      }
+      const server = inst.engine === 'redis' ? 'Redis' : 'MySQL'
+      message.success(`Connected${res.server_version ? ` to ${server} ${res.server_version}` : ` to ${server}`}.`)
+    },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
 
   function openCreate() {
     setEditing(null)
     form.resetFields()
-    form.setFieldsValue({ engine: 'mysql', port: 3306, env: 'prod', enabled: true })
+    form.setFieldsValue({ engine: 'mysql', port: DEFAULT_PORT.mysql, env: 'prod', enabled: true })
     setModalOpen(true)
   }
 
@@ -79,8 +106,8 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
         <Typography.Text type="secondary">
-          A registered database sits on its machine — agenda-node connects to it locally, so its port never has to be
-          published to the network.
+          A registered MySQL or Redis sits on its machine — agenda-node connects to it locally, so its port never has to
+          be published to the network.
         </Typography.Text>
         {isAdmin && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -100,6 +127,11 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
         pagination={false}
         columns={[
           { title: 'Name', dataIndex: 'name', render: (v) => <strong>{v}</strong> },
+          {
+            title: 'Engine',
+            dataIndex: 'engine',
+            render: (v: string) => <Tag color={v === 'redis' ? 'magenta' : 'geekblue'}>{v}</Tag>,
+          },
           { title: 'Environment', dataIndex: 'env', render: (v: string) => <Tag color={ENV_COLOR[v]}>{v}</Tag> },
           {
             title: 'Machine',
@@ -130,8 +162,8 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
                 <Space>
                   <Button
                     size="small"
-                    loading={testMutation.isPending && testMutation.variables === inst.id}
-                    onClick={() => testMutation.mutate(inst.id)}
+                    loading={testMutation.isPending && testMutation.variables?.id === inst.id}
+                    onClick={() => testMutation.mutate(inst)}
                   >
                     Test
                   </Button>
@@ -162,7 +194,13 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
             <Input placeholder="orders-prod" />
           </Form.Item>
           <Form.Item name="engine" label="Engine">
-            <Select options={[{ value: 'mysql', label: 'MySQL' }]} />
+            <Select
+              options={[
+                { value: 'mysql', label: 'MySQL' },
+                { value: 'redis', label: 'Redis' },
+              ]}
+              onChange={(v: string) => form.setFieldsValue({ port: DEFAULT_PORT[v] })}
+            />
           </Form.Item>
           <Form.Item
             name="machine_id"
@@ -179,23 +217,28 @@ export function InstancesTab({ instances, loading }: { instances: DatabaseInstan
           <Form.Item name="port" label="Port" rules={[{ required: true }]}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="username" label="Username" rules={[{ required: true }]}>
-            <Input placeholder="agenda_ro" autoComplete="off" />
+          <Form.Item
+            name="username"
+            label="Username"
+            rules={isRedis ? [] : [{ required: true }]}
+            extra={isRedis ? 'Leave blank unless the server runs ACL users; blank means the default user.' : undefined}
+          >
+            <Input placeholder={isRedis ? 'default' : 'agenda_ro'} autoComplete="off" />
           </Form.Item>
           <Form.Item
             name="password"
             label="Password"
-            rules={editing ? [] : [{ required: true }]}
-            extra={
-              editing
-                ? 'Leave blank to keep the stored password.'
-                : 'Use an account with SELECT and nothing else — that grant is what actually keeps this read-only.'
-            }
+            rules={editing || isRedis ? [] : [{ required: true }]}
+            extra={passwordHint(editing !== null, isRedis)}
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="default_database" label="Default schema">
-            <Input placeholder="orders" />
+          <Form.Item
+            name="default_database"
+            label={isRedis ? 'Default DB index' : 'Default schema'}
+            rules={isRedis ? [{ pattern: /^\d+$/, message: 'A Redis default is a numeric database index.' }] : []}
+          >
+            <Input placeholder={isRedis ? '0' : 'orders'} />
           </Form.Item>
           <Form.Item name="env" label="Environment" extra="Production and staging databases can only be queried by admins.">
             <Select

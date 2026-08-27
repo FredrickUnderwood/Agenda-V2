@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/auth"
+	"github.com/FredrickUnderwood/agenda-v2/internal/redisguard"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 	"github.com/FredrickUnderwood/agenda-v2/internal/sqlguard"
 )
@@ -131,6 +132,46 @@ func (s *Server) queryDatabaseInstance(c *gin.Context) {
 	Success(c, result)
 }
 
+// runRedisCommand is queryDatabaseInstance's Redis counterpart. It is a
+// separate route rather than a branch inside the query route because the two
+// carry different bodies — a statement and a schema versus a command and a
+// numeric DB index — and folding them together would mean guessing which one
+// the caller meant.
+func (s *Server) runRedisCommand(c *gin.Context) {
+	id, ok := paramInt64(c, "instanceID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid database instance ID")
+		return
+	}
+	var req service.RedisCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		FailMessage(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.dbQuerySvc.RunRedisCommand(c.Request.Context(), s.principal(c), id, req)
+	if err != nil {
+		FailWith(c, queryStatus(err), err)
+		return
+	}
+	Success(c, result)
+}
+
+// getRedisDatabases backs the console's DB picker: how many numeric databases
+// this server has, so the picker offers the right range instead of assuming 16.
+func (s *Server) getRedisDatabases(c *gin.Context) {
+	id, ok := paramInt64(c, "instanceID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid database instance ID")
+		return
+	}
+	count, err := s.dbQuerySvc.RedisDatabaseCount(c.Request.Context(), s.principal(c), id)
+	if err != nil {
+		FailWith(c, queryStatus(err), err)
+		return
+	}
+	Success(c, gin.H{"count": count})
+}
+
 func (s *Server) listDatabaseInstanceDatabases(c *gin.Context) {
 	id, ok := paramInt64(c, "instanceID")
 	if !ok {
@@ -205,14 +246,17 @@ func (s *Server) getDBQueryLog(c *gin.Context) {
 }
 
 // queryStatus maps a query failure to the status that describes it. Anything
-// the guard rejected is the caller's statement (400); a permission failure is
+// either guard rejected — and anything aimed at the wrong engine — is the
+// caller's statement (400); a permission failure is
 // 403; an instance bound to a non-agent machine is a configuration conflict
 // (409); everything else is treated as the database or its node being
 // unreachable (502), which is what a bad password or a stopped server looks
 // like from here.
 func queryStatus(err error) int {
 	switch {
-	case errors.Is(err, sqlguard.ErrRejected):
+	case errors.Is(err, sqlguard.ErrRejected), errors.Is(err, redisguard.ErrRejected):
+		return http.StatusBadRequest
+	case errors.Is(err, service.ErrWrongEngine):
 		return http.StatusBadRequest
 	case errors.Is(err, service.ErrQueryForbidden):
 		return http.StatusForbidden

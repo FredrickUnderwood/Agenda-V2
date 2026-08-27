@@ -125,11 +125,8 @@ type QueryResult struct {
 // to run what" is exactly the question an audit trail exists to answer, and
 // recording only successes would answer it wrongly.
 func (s *DatabaseQueryService) Query(ctx context.Context, p Principal, instanceID int64, req QueryRequest) (*QueryResult, error) {
-	inst, err := s.instances.Get(ctx, instanceID)
+	inst, err := s.authorizeSQL(ctx, p, instanceID)
 	if err != nil {
-		return nil, ErrDatabaseInstanceNotFound
-	}
-	if err := AuthorizeQuery(p, inst); err != nil {
 		return nil, err
 	}
 	// Reject here as well as on the node so the operator gets the real reason
@@ -179,6 +176,24 @@ func (s *DatabaseQueryService) Query(ctx context.Context, p Principal, instanceI
 	}, nil
 }
 
+// authorizeSQL loads an instance for the SQL path and checks both things every
+// entry point on that path needs: that the caller may query it, and that it is
+// a SQL instance at all. Sending a SELECT to a Redis registration would
+// otherwise reach the node and come back as an unhelpful protocol error.
+func (s *DatabaseQueryService) authorizeSQL(ctx context.Context, p Principal, instanceID int64) (*domain.DatabaseInstance, error) {
+	inst, err := s.instances.Get(ctx, instanceID)
+	if err != nil {
+		return nil, ErrDatabaseInstanceNotFound
+	}
+	if inst.Engine == domain.DatabaseEngineRedis {
+		return nil, fmt.Errorf("%w: %s is a Redis instance; use the Redis console", ErrWrongEngine, inst.Name)
+	}
+	if err := AuthorizeQuery(p, inst); err != nil {
+		return nil, err
+	}
+	return inst, nil
+}
+
 // execute resolves the instance and relays one statement to its node. The
 // node's own "reachable but the database failed" convention is collapsed into
 // an ordinary error here, because from a caller's point of view both mean the
@@ -215,6 +230,13 @@ func (s *DatabaseQueryService) execute(ctx context.Context, instanceID int64, da
 // It runs a real statement over the ordinary query path but is not audited: it
 // reads no data, and an operator saving a form should not fill the trail.
 func (s *DatabaseQueryService) TestInstance(ctx context.Context, instanceID int64) (version string, err error) {
+	inst, err := s.instances.Get(ctx, instanceID)
+	if err != nil {
+		return "", ErrDatabaseInstanceNotFound
+	}
+	if inst.Engine == domain.DatabaseEngineRedis {
+		return s.testRedis(ctx, instanceID)
+	}
 	resp, err := s.execute(ctx, instanceID, "", "SELECT VERSION()", 1, 5000)
 	if err != nil {
 		return "", err
@@ -257,11 +279,7 @@ func (s *DatabaseQueryService) SchemaOutline(ctx context.Context, p Principal, i
 	if database == "" {
 		return nil, errors.New("database is required")
 	}
-	inst, err := s.instances.Get(ctx, instanceID)
-	if err != nil {
-		return nil, ErrDatabaseInstanceNotFound
-	}
-	if err := AuthorizeQuery(p, inst); err != nil {
+	if _, err := s.authorizeSQL(ctx, p, instanceID); err != nil {
 		return nil, err
 	}
 
@@ -308,11 +326,7 @@ func quoteMySQLString(v string) (string, error) {
 }
 
 func (s *DatabaseQueryService) singleColumn(ctx context.Context, p Principal, instanceID int64, database, stmt string) ([]string, error) {
-	inst, err := s.instances.Get(ctx, instanceID)
-	if err != nil {
-		return nil, ErrDatabaseInstanceNotFound
-	}
-	if err := AuthorizeQuery(p, inst); err != nil {
+	if _, err := s.authorizeSQL(ctx, p, instanceID); err != nil {
 		return nil, err
 	}
 	resp, err := s.execute(ctx, instanceID, database, stmt, contract.NodeDBMaxRows, 10000)

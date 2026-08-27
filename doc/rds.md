@@ -1,13 +1,18 @@
-# Databases: read-only SQL from the console
+# Databases: reading MySQL and Redis from the console
 
-The Databases section lets an operator register a database and run read-only
-SQL against it from the web console, without opening a database port to the
-network and without anyone SSH-ing into the machine.
+The Databases section lets an operator register a database and read it from the
+web console — read-only SQL against MySQL, read-only commands against Redis —
+without opening a database port to the network and without anyone SSH-ing into
+the machine.
+
+Everything below applies to both engines unless a section says otherwise; the
+Redis specifics are gathered under [Redis](#redis).
 
 ## How a query travels
 
 ```
 browser  ──JWT──▶  control plane  ──node token──▶  agenda-node  ──▶  127.0.0.1:3306
+                                                                └──▶  127.0.0.1:6379
 ```
 
 The control plane never opens a database connection. It hands the statement to
@@ -23,7 +28,10 @@ stating plainly:
   cannot be registered.
 
 Only agent-mode machines can host a registered database — an SSH machine has no
-resident node to relay through.
+resident node to relay through. Both consoles run over this one path: the SQL
+relay is `POST /v1/db/query` on the node, the Redis relay `POST /v1/redis/command`,
+and each re-validates what it was handed rather than trusting the control plane
+to have done it.
 
 ## Before you register anything
 
@@ -72,7 +80,7 @@ If you instead run agenda-node bare-metal under systemd
 (`cmd/agenda-node/agenda-node.service`), the connection does come from
 `127.0.0.1` and `@'localhost'` is correct.
 
-### MySQL must listen on the bridge as well as loopback
+### The database must listen on the bridge as well as loopback
 
 With `bind-address = 127.0.0.1`, a containerized node cannot reach MySQL at all.
 It also has to listen on the bridge gateway. Find that address rather than
@@ -97,7 +105,13 @@ port is published: `127.0.0.1:3306:3306` is unreachable from the node, while
 binding it to the bridge gateway — `172.17.0.1:3306:3306`, again substituting
 your own — works.
 
-## The read-only account
+Redis has exactly the same two problems and the same two fixes: `bind 127.0.0.1
+172.17.0.1` in `redis.conf`, or `172.17.0.1:6379:6379` if it is containerized.
+Its equivalent of the account's host scoping is the ACL rule
+`ACL SETUSER agenda_ro ... ` plus, if you want it, a `bind` narrow enough that
+nothing else can reach the port at all.
+
+## The read-only MySQL account
 
 agenda parses every statement and sets `transaction_read_only` on the session,
 but **neither is the security boundary**. Both are there to catch mistakes. The
@@ -184,8 +198,9 @@ place rather than assumed.
 ## Registering a database
 
 **Databases → Instances → Register database** (admins only, because it stores a
-password). You will need the machine, the port, the account, and optionally a
-default schema.
+password). You will need the engine, the machine, the port, the account, and
+optionally a default — a schema for MySQL, a numeric DB index for Redis.
+Choosing the engine fills in its conventional port (3306 / 6379).
 
 The password is encrypted at rest with `security.master_key`, exactly like a
 machine's agent token. Without a master key configured it is stored in plaintext
@@ -193,10 +208,13 @@ and the control plane warns on every write.
 
 Use **Test** to confirm the node can reach the database with those credentials —
 it reports the server version on success and the connection error on failure.
+For Redis the test is a `PING`, so an ACL narrow enough to withhold `INFO` still
+passes; the version is then simply omitted.
 
 ## Who can query what
 
-The environment on an instance decides who may run statements against it:
+The environment on an instance decides who may run statements or commands
+against it, whichever engine it is:
 
 | Environment | Who can query |
 |---|---|
@@ -209,7 +227,7 @@ This is deliberately coarse. The whole rule is one function —
 `service.AuthorizeQuery` — so replacing it with a per-instance ACL later does
 not touch the handlers or the query path.
 
-## What may be run
+## What SQL may be run
 
 Single statements only, beginning with `SELECT`, `WITH`, `SHOW`, `DESCRIBE`,
 `DESC` or `EXPLAIN`. Also refused: `INTO OUTFILE` / `INTO DUMPFILE`, MySQL
@@ -233,9 +251,9 @@ The node also asks the server to enforce the timeout itself
 (`max_execution_time`, or `max_statement_time` on MariaDB), so a query outlives
 neither side.
 
-## The editor
+## The SQL editor
 
-The console editor does MySQL syntax highlighting and completion for keywords,
+The SQL console's editor does MySQL syntax highlighting and completion for keywords,
 tables and columns, using the schema you have selected. `Cmd`/`Ctrl`+`Enter`
 runs the statement.
 
@@ -256,10 +274,113 @@ grouped rather than hidden: querying `information_schema` from a console is a
 reasonable thing to want, it just should not sit between you and your own
 schemas.
 
+## Redis
+
+A Redis registration works like a MySQL one — same machine binding, same
+password-at-rest, same environment rule, same audit trail. Three things differ.
+
+### The account
+
+The boundary is the same kind of thing it is for MySQL: what the account may do.
+On Redis 6+ that is an ACL user.
+
+```
+ACL SETUSER agenda_ro on >REPLACE_WITH_A_STRONG_PASSWORD ~* \
+  +@read +@connection -@admin -@dangerous
+```
+
+`+@read` is the read category and `+@connection` covers `PING` and `AUTH`;
+nothing in `@write` or `@scripting` is granted at all. The two `-` rules are
+belt and braces — a handful of commands sit in more than one category, and
+subtracting the administrative ones after adding the others removes any that
+came along.
+
+So a command the console's guard somehow let through is still refused by the
+server, which is the point: the guard catches mistakes, the ACL is the
+boundary.
+
+Two useful extras, both optional:
+
+```
+# Let the console show the server version and read config values.
+ACL SETUSER agenda_ro +info +config|get
+
+# Restrict what the account can see at all, by key prefix.
+ACL SETUSER agenda_ro resetkeys ~cache:* ~session:*
+```
+
+`ACL GETUSER agenda_ro` shows what ended up applied. Check it the way the MySQL
+section suggests — connect as the account and confirm a write is refused:
+
+```
+SET probe 1      # (error) NOPERM ... has no permissions to run the 'set' command
+```
+
+An older Redis with no ACL support has only `requirepass`, which authenticates
+but authorizes nothing. There the guard is all that stands between the console
+and a write, and this module should be pointed at a replica rather than a
+primary.
+
+The username is optional in the registration form: blank means Redis's `default`
+user, which is what a `requirepass`-only server has. The password may be blank
+too — a Redis bound to loopback often has no `requirepass` at all, and demanding
+one would only produce a password the server never checks.
+
+### What may be run
+
+One command per run, from an allowlist of read-only commands
+(`internal/redisguard`). Refusing anything not listed means a command introduced
+by a future Redis version is refused until someone has looked at it, which is
+the safe direction for a default.
+
+Worth knowing about the refusals that are not obvious:
+
+| Refused | Why |
+|---|---|
+| `GETDEL`, `GETEX`, `PFCOUNT` | They read, and they also write. `PFCOUNT` rewrites the HyperLogLog's cached cardinality. |
+| `SORT`, `GEORADIUS` | Both take a `STORE` option. `SORT_RO` is allowed in place of `SORT`. |
+| `EVAL`, `EVALSHA`, `FUNCTION` | A script's contents are opaque to any allowlist. |
+| `SUBSCRIBE`, `MONITOR`, `BLPOP`, `XREAD` | They block or stream; neither fits a request/response console, and both outlive the statement timeout. |
+| `SELECT`, `SWAPDB`, `MOVE` | The DB index is chosen in the console and written to the audit trail. A command must not be able to move itself elsewhere. |
+| `CONFIG SET`, `CLIENT KILL`, `DEBUG`, `FLUSHDB` | Administration. |
+
+`KEYS` **is** allowed, and on a large keyspace it will block the server while it
+runs. Prefer `SCAN` on anything busy.
+
+Arguments are split the way `redis-cli` splits them — on whitespace, with single
+or double quotes grouping an argument that contains spaces. The `\xNN` escapes
+`redis-cli` accepts are not implemented, so a key whose bytes cannot be typed
+cannot be reached from here.
+
+### Choosing a database, and reading the reply
+
+The console's picker offers `db0`..`db<n-1>`, where `n` comes from
+`CONFIG GET databases`. An account that may not read that setting is not an
+error — the picker falls back to Redis's own default of 16. The instance's
+registered "default DB index" is what the picker starts on.
+
+A reply is rendered into the same columns-and-rows grid a SQL result uses, so
+the console, the stored snapshot and the history viewer all stay one
+implementation:
+
+| Reply | Rendered as |
+|---|---|
+| A single value (`GET`, `TTL`, `LLEN`) | One row, one `value` column labelled with the Redis type. |
+| A null reply (a key that does not exist) | One row holding `NULL` — an answer, not a failure. |
+| An array (`LRANGE`, `KEYS`, `SMEMBERS`) | One row per element, numbered. Nested arrays contribute their own elements in order, so `SCAN` reads as the cursor followed by the keys. |
+| `HGETALL`, `CONFIG GET`, `XINFO STREAM` | Two columns, `field` and `value`. |
+
+Values that are not valid UTF-8 are base64-encoded and the column says so, the
+same rule the SQL grid follows for `BLOB` columns.
+
+The row, byte and timeout caps are the same as for SQL, and are applied while
+the reply is being walked rather than afterwards.
+
 ## Query history
 
-Every statement that runs is recorded: who ran it, against what, how long it
-took, and a capped copy of what it returned. Failures are recorded too — "who
+Every statement or command that runs is recorded: who ran it, against what
+(a Redis entry names the index it ran in, `db0`), how long it took, and a capped
+copy of what it returned. Failures are recorded too — "who
 tried to run what" is the question an audit trail exists to answer.
 
 A signed-in user sees their own history; an admin sees everyone's.
@@ -279,9 +400,13 @@ plane's own logs.
 
 ## Limits of this version
 
-- MySQL only. The `engine` field exists so another can be added, but nothing
-  else is implemented.
+- MySQL and Redis. The `engine` field is what selects between them, and a third
+  engine is a new guard plus a new node executor.
 - Reads only. There is no plan to add writes through this path.
+- One statement or command at a time. There is no transaction, no pipeline, and
+  no `MULTI`.
+- Redis Cluster is not modelled: the node opens a plain client, so a `MOVED`
+  redirection comes back as an error rather than being followed.
 - Editor completion reads `information_schema.COLUMNS` for the selected schema.
   On a server with very many tables that call can be slow or hit the row cap, in
   which case completion is partial or absent — the console says so and stays
