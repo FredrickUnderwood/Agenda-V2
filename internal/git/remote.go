@@ -17,14 +17,16 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
 
-// FetchRemoteSHA returns the current commit SHA of the given branch.
-// machine == nil means execute locally.
-func FetchRemoteSHA(ctx context.Context, repoURL, branch string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
-	authedURL, err := injectToken(repoURL, cfg)
-	if err != nil {
-		return "", err
-	}
-
+// ResolveHeadSHA returns the full 40-character SHA currently checked out at
+// localPath on the target machine. machine == nil means execute locally.
+//
+// This is what a deploy records as the commit it shipped, for both the pinned
+// and the unpinned case: reading it back off the working tree (rather than
+// re-deriving it from the remote) means the recorded SHA is always the object
+// the build actually ran against, and is always the full object name even when
+// the operator pinned an abbreviation. A later rollback can therefore feed the
+// stored value straight back into Pull with no further resolution.
+func ResolveHeadSHA(ctx context.Context, localPath string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
 	gitBin := cfg.Git.GitBin
 	if gitBin == "" {
 		gitBin = "git"
@@ -32,29 +34,24 @@ func FetchRemoteSHA(ctx context.Context, repoURL, branch string, cfg *config.Con
 
 	r := runner.New(machine)
 	var buf bytes.Buffer
-	if err := r.RunCmd(ctx, "", gitBin, []string{"ls-remote", "--heads", authedURL, "refs/heads/" + branch}, &buf); err != nil {
+	if err := r.RunCmd(ctx, "", gitBin, []string{"-C", localPath, "rev-parse", "HEAD"}, &buf); err != nil {
 		out := redactTokens(strings.TrimSpace(buf.String()), cfg)
-		logger.L().Error("git ls-remote failed",
-			zap.String("repo_url", repoURL),
-			zap.String("branch", branch),
+		logger.L().Error("git rev-parse HEAD failed",
+			zap.String("local_path", localPath),
 			zap.String("output", out),
 			zap.Error(err),
 		)
 		if out != "" {
-			return "", errors.New("git ls-remote: " + out)
+			return "", errors.New("git rev-parse: " + out)
 		}
 		return "", err
 	}
 
-	line := strings.TrimSpace(buf.String())
-	if line == "" {
-		return "", errors.New("branch " + branch + " not found on remote")
+	sha := strings.TrimSpace(buf.String())
+	if sha == "" {
+		return "", errors.New("git rev-parse HEAD returned nothing for " + localPath)
 	}
-	parts := strings.Fields(line)
-	if len(parts) < 1 {
-		return "", errors.New("unexpected ls-remote output: " + line)
-	}
-	return parts[0], nil
+	return sha, nil
 }
 
 // Pull clones or updates the repo at localPath on the target machine, then

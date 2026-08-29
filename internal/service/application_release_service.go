@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/git"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/repository"
 )
@@ -70,7 +71,12 @@ func (s *ApplicationReleaseService) Create(ctx context.Context, appID int64, req
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", env, instanceName))
 	}
 
-	rel, err := s.buildDraft(ctx, app, target, req.Branch, req.CommitSHA, req.Operator, 0)
+	commitSHA, err := git.NormalizeCommitSHA(req.CommitSHA)
+	if err != nil {
+		return nil, err
+	}
+
+	rel, err := s.buildDraft(ctx, app, target, req.Branch, commitSHA, req.Operator, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +166,12 @@ func (s *ApplicationReleaseService) List(ctx context.Context, f ListReleasesFilt
 // ResolveRollbackTarget returns the release a rollback should redeploy: the
 // explicitly requested targetReleaseID if given (must be verified and belong
 // to the same app/env/instance as badReleaseID), otherwise the most recent
-// verified release for that app/env/instance.
+// verified release created before badReleaseID.
+//
+// The automatic target deliberately looks *before* the bad release rather than
+// simply taking the instance's latest verified release: a problem is often only
+// noticed after someone already clicked verify, and "latest verified" would
+// then resolve to the bad release itself and refuse to roll anything back.
 func (s *ApplicationReleaseService) ResolveRollbackTarget(ctx context.Context, badReleaseID, targetReleaseID int64) (*domain.ApplicationRelease, error) {
 	bad, err := s.releases.GetByID(ctx, badReleaseID)
 	if err != nil {
@@ -179,22 +190,28 @@ func (s *ApplicationReleaseService) ResolveRollbackTarget(ctx context.Context, b
 		}
 		return target, nil
 	}
-	latest, err := s.releases.GetLatestVerified(ctx, bad.ApplicationID, bad.Env, bad.InstanceName)
+	prev, err := s.releases.GetPreviousVerified(ctx, bad.ApplicationID, bad.Env, bad.InstanceName, bad.ID)
 	if err != nil {
 		return nil, err
 	}
-	if latest == nil {
-		return nil, errors.New("no verified release to roll back to")
-	}
-	if latest.ID == bad.ID {
+	if prev == nil {
 		return nil, errors.New("no earlier verified release to roll back to")
 	}
-	return latest, nil
+	return prev, nil
 }
 
 // CreateRollbackDraft builds (and persists as draft) a new release that
 // redeploys target's commit, linked back to the release it supersedes.
-func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad, target *domain.ApplicationRelease) (*domain.ApplicationRelease, error) {
+// envDeploymentID groups it under an env-wide rollback batch, or is 0 for a
+// single-instance rollback.
+//
+// Only the commit is rolled back — the new release snapshots the application's
+// *current* deploy config, environment variables and gateway routes, exactly
+// like any other deploy. Rolling configuration back alongside code would mean
+// silently reverting changes an operator may have made deliberately since, and
+// there is no way to tell the two apart from here; an operator who wants the
+// old configuration back edits it and deploys again.
+func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad, target *domain.ApplicationRelease, envDeploymentID int64) (*domain.ApplicationRelease, error) {
 	app, err := s.apps.GetByID(ctx, bad.ApplicationID)
 	if err != nil {
 		return nil, err
@@ -206,7 +223,7 @@ func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad
 	if !envTarget.Enabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", bad.Env, bad.InstanceName))
 	}
-	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, bad.Operator, 0)
+	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, bad.Operator, envDeploymentID)
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +234,47 @@ func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad
 	}
 	logStruct("rollback release created", rel)
 	return rel, nil
+}
+
+// EnvRollbackPair is one instance's rollback decision: the release being
+// superseded and the earlier verified release its commit will be redeployed
+// from.
+type EnvRollbackPair struct {
+	Bad    *domain.ApplicationRelease
+	Target *domain.ApplicationRelease
+}
+
+// PlanEnvRollback resolves the rollback target for every child release of an
+// env-wide deploy, and is all-or-nothing: if any instance that needs rolling
+// back has no earlier verified release, the whole plan is rejected rather than
+// returning a partial one. Half-rolling-back an environment would leave two
+// different versions of the application behind the same gateway route, which
+// is a worse state than the bad deploy the operator is trying to undo.
+//
+// Children that never changed what is running on their instance are skipped
+// rather than failing the plan: a draft or failed child never got as far as
+// replacing anything, and an already rolled_back one has been dealt with. A
+// child still deploying does fail the plan — its outcome is not yet known, so
+// neither rolling it back nor ignoring it is defensible.
+func (s *ApplicationReleaseService) PlanEnvRollback(ctx context.Context, children []*domain.ApplicationRelease) ([]EnvRollbackPair, error) {
+	pairs := make([]EnvRollbackPair, 0, len(children))
+	for _, child := range children {
+		switch child.Status {
+		case domain.ReleaseStatusDraft, domain.ReleaseStatusFailed, domain.ReleaseStatusRolledBack:
+			continue
+		case domain.ReleaseStatusDeploying, domain.ReleaseStatusRollingBack:
+			return nil, errors.New(fmt.Sprintf("instance %s is still %s; wait for it to settle before rolling back", child.InstanceName, child.Status))
+		}
+		target, err := s.ResolveRollbackTarget(ctx, child.ID, 0)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("instance %s: %s", child.InstanceName, err.Error()))
+		}
+		pairs = append(pairs, EnvRollbackPair{Bad: child, Target: target})
+	}
+	if len(pairs) == 0 {
+		return nil, errors.New("no instance in this deploy has anything to roll back")
+	}
+	return pairs, nil
 }
 
 func (s *ApplicationReleaseService) Verify(ctx context.Context, id int64) (*domain.ApplicationRelease, error) {

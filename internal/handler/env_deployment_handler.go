@@ -59,6 +59,40 @@ func (s *Server) listEnvDeployments(c *gin.Context) {
 	Success(c, gin.H{"data": batches, "total": len(batches)})
 }
 
+// verifyEnvDeployment closes out a rollout in one call: every instance of the
+// batch that is awaiting verification is marked verified.
+func (s *Server) verifyEnvDeployment(c *gin.Context) {
+	id, ok := paramInt64(c, "deploymentID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid deployment ID")
+		return
+	}
+	batch, err := s.releaseApp.VerifyEnv(c.Request.Context(), id)
+	if err != nil {
+		FailWith(c, http.StatusBadRequest, err)
+		return
+	}
+	Success(c, batch)
+}
+
+// rollbackEnvDeployment redeploys every instance of the batch from the last
+// verified release it ran before this one, as a new batch linked back to this
+// one. Returns 202 with the new batch; its per-instance pipelines run
+// asynchronously.
+func (s *Server) rollbackEnvDeployment(c *gin.Context) {
+	id, ok := paramInt64(c, "deploymentID")
+	if !ok {
+		FailMessage(c, http.StatusBadRequest, "invalid deployment ID")
+		return
+	}
+	batch, err := s.releaseApp.RollbackEnv(c.Request.Context(), id)
+	if err != nil {
+		FailWith(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, batch)
+}
+
 // getEnvDeployment returns the batch with its child per-instance releases —
 // the "instance list" for one environment-wide deploy.
 func (s *Server) getEnvDeployment(c *gin.Context) {

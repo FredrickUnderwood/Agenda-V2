@@ -12,6 +12,7 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
+	"github.com/FredrickUnderwood/agenda-v2/internal/git"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 	"github.com/FredrickUnderwood/agenda-v2/internal/pipeline"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
@@ -79,6 +80,13 @@ func (a *ReleaseApplication) DeployEnv(ctx context.Context, appID int64, env dom
 	}
 	if strings.TrimSpace(branch) == "" {
 		branch = domain.DefaultBranch
+	}
+	// Normalize here rather than per child: every release in the batch must
+	// pin the same commit, and a malformed pin should be rejected before any
+	// row is written, not once per instance mid-fan-out.
+	commitSHA, err := git.NormalizeCommitSHA(commitSHA)
+	if err != nil {
+		return nil, err
 	}
 	app, err := a.appSvc.Get(ctx, appID)
 	if err != nil {
@@ -300,7 +308,7 @@ func (a *ReleaseApplication) Rollback(ctx context.Context, badReleaseID, targetR
 	if err != nil {
 		return nil, err
 	}
-	newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, bad, target)
+	newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, bad, target, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +322,134 @@ func (a *ReleaseApplication) Rollback(ctx context.Context, badReleaseID, targetR
 	// (syncReleaseStatus) — not ideal bookkeeping, but never a stuck state.
 	_ = a.releaseSvc.MarkRollingBack(ctx, badReleaseID)
 	return newRel, nil
+}
+
+// VerifyEnv marks every child of an env-wide deploy that is awaiting
+// verification as verified — the batch-level counterpart of verifying one
+// release. It is the normal way to close out a rollout: an operator checks the
+// environment once, not once per instance.
+//
+// Children in any other status are left alone rather than rejected, so a batch
+// where one instance failed (or was already verified individually) can still be
+// closed out in one click. A child whose verify fails is logged and skipped;
+// the call still succeeds as long as at least one child was verified, and the
+// returned batch carries every child's current status for the caller to render.
+func (a *ReleaseApplication) VerifyEnv(ctx context.Context, batchID int64) (*domain.EnvDeployment, error) {
+	logger.L().Info("release: env verify requested", zap.Int64("batch_id", batchID))
+	if a.envDeploySvc == nil {
+		return nil, errors.New("env deployments are not enabled in this build")
+	}
+	batch, err := a.envDeploySvc.Get(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	verified := 0
+	for _, child := range batch.Releases {
+		if child.Status != domain.ReleaseStatusPendingVerify {
+			continue
+		}
+		if _, err := a.releaseSvc.Verify(ctx, child.ID); err != nil {
+			logger.L().Error("release: env verify child failed",
+				zap.Int64("batch_id", batchID), zap.Int64("release_id", child.ID), zap.Error(err))
+			continue
+		}
+		verified++
+	}
+	if verified == 0 {
+		return nil, errors.New("no instance in this deploy is awaiting verification")
+	}
+	logger.L().Info("release: env verified", zap.Int64("batch_id", batchID), zap.Int("instances", verified))
+	return a.envDeploySvc.Get(ctx, batchID)
+}
+
+// RollbackEnv rolls a whole env-wide deploy back: every instance the batch
+// touched is redeployed from the last verified release it ran before this
+// batch, as one new EnvDeployment linked back via RollbackOfID. Each instance
+// resolves its own target independently, because instances of the same env do
+// not necessarily share a history (one may have been added later, or already
+// rolled back on its own).
+//
+// The whole plan is resolved before anything is created (PlanEnvRollback), so
+// an environment is never left half-rolled-back because the last instance had
+// no earlier verified release. Once the plan is accepted the fan-out is
+// best-effort per instance, exactly like DeployEnv: one instance failing to
+// start does not hold up the others, and the batch aggregate records it.
+func (a *ReleaseApplication) RollbackEnv(ctx context.Context, batchID int64) (*domain.EnvDeployment, error) {
+	logger.L().Info("release: env rollback requested", zap.Int64("batch_id", batchID))
+	if a.envDeploySvc == nil {
+		return nil, errors.New("env deployments are not enabled in this build")
+	}
+	bad, err := a.envDeploySvc.Get(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	pairs, err := a.releaseSvc.PlanEnvRollback(ctx, bad.Releases)
+	if err != nil {
+		return nil, err
+	}
+
+	branch, commitSHA := rollbackBatchPin(pairs, bad.Branch)
+	batch := &domain.EnvDeployment{
+		ApplicationID: bad.ApplicationID,
+		Env:           bad.Env,
+		Branch:        branch,
+		CommitSHA:     commitSHA,
+		RollbackOfID:  bad.ID,
+		Operator:      bad.Operator,
+		Status:        domain.EnvDeploymentStatusRunning,
+		TotalCount:    len(pairs),
+	}
+	if err := a.envDeploySvc.Create(ctx, batch); err != nil {
+		return nil, err
+	}
+
+	for _, pair := range pairs {
+		newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, pair.Bad, pair.Target, batch.ID)
+		if err != nil {
+			logger.L().Error("release: env rollback child draft failed",
+				zap.Int64("batch_id", batch.ID), zap.String("instance", pair.Bad.InstanceName), zap.Error(err))
+			continue
+		}
+		if _, err := a.Deploy(ctx, newRel.ID); err != nil {
+			logger.L().Error("release: env rollback child start failed",
+				zap.Int64("batch_id", batch.ID), zap.Int64("release_id", newRel.ID), zap.Error(err))
+			_ = a.releaseSvc.MarkDeployFailed(ctx, newRel.ID)
+			continue
+		}
+		// Only once the replacement is actually running: a superseded release
+		// that never got replaced must stay in its own status, since
+		// rolling_back accepts no further verify/retry/rollback and there is
+		// nothing that would clear it (same reasoning as Rollback).
+		_ = a.releaseSvc.MarkRollingBack(ctx, pair.Bad.ID)
+	}
+
+	if _, err := a.envDeploySvc.Reconcile(ctx, batch.ID); err != nil {
+		logger.L().Error("release: env rollback initial reconcile failed", zap.Int64("batch_id", batch.ID), zap.Error(err))
+	}
+	return a.envDeploySvc.Get(ctx, batch.ID)
+}
+
+// rollbackBatchPin summarizes what a rollback batch is deploying, for the batch
+// row's own branch/commit columns. Instances can roll back to different commits
+// (each resolves its own history), and the batch row holds only one of each —
+// so a value is recorded only when every instance agrees on it. fallbackBranch
+// is the superseded batch's branch, used when the targets disagree so the row
+// is never left blank.
+func rollbackBatchPin(pairs []service.EnvRollbackPair, fallbackBranch string) (branch, commitSHA string) {
+	if len(pairs) == 0 {
+		return fallbackBranch, ""
+	}
+	branch, commitSHA = pairs[0].Target.Branch, pairs[0].Target.CommitSHA
+	for _, pair := range pairs[1:] {
+		if pair.Target.Branch != branch {
+			branch = fallbackBranch
+		}
+		if pair.Target.CommitSHA != commitSHA {
+			commitSHA = ""
+		}
+	}
+	return branch, commitSHA
 }
 
 func (a *ReleaseApplication) loadTarget(ctx context.Context, releaseID int64) (*domain.ApplicationRelease, *domain.DeployTarget, error) {
