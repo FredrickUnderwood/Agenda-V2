@@ -20,13 +20,15 @@ func (s *GitPullStep) Execute(ctx context.Context, rc *RunContext) error {
 	if err := git.Pull(ctx, app.RepoURL, rc.LocalPath, rc.Branch, rc.CommitSHA, rc.Cfg, s.Machine); err != nil {
 		return err
 	}
-	// Read the SHA back off the working tree rather than trusting the input:
-	// it is the full object name even when the operator pinned an
-	// abbreviation, and for an unpinned deploy it is what was actually
-	// checked out rather than a second, independently resolved view of the
-	// branch head. The release records this value (see MarkDeploySucceeded),
-	// so it is also exactly what a later rollback will re-pin.
-	sha, err := git.ResolveHeadSHA(ctx, rc.LocalPath, rc.Cfg, s.Machine)
+	// Expand whatever was asked for into a full object name, using the pin when
+	// there is one and the checked-out HEAD only when there isn't. The release
+	// records this value (see MarkDeploySucceeded) and a later rollback re-pins
+	// it verbatim, so it has to be the commit this deploy asked for: resolving
+	// HEAD unconditionally would let a sibling instance sharing this checkout
+	// (see git.ResolveLocalPath) move it between the pull and the read, and the
+	// wrong SHA recorded here would silently mis-target every future rollback of
+	// this instance.
+	sha, err := git.ResolveSHA(ctx, rc.LocalPath, rc.CommitSHA, rc.Cfg, s.Machine)
 	if err != nil {
 		return err
 	}

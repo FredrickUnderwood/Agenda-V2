@@ -122,6 +122,41 @@ func TestVerifyEnvRejectsBatchWithNothingAwaitingVerification(t *testing.T) {
 	}
 }
 
+// A double-submitted rollback must not create a second batch: both would plan
+// against children that are still pending_verify and then race on each
+// instance's deploy lock.
+func TestRollbackEnvRefusesWhileAnEarlierRollbackIsUnfinished(t *testing.T) {
+	app, db := newBatchTestApp(t)
+	ctx := context.Background()
+	bad := seedBatch(t, db)
+	seedChild(t, db, bad.ID, "blue", domain.ReleaseStatusPendingVerify)
+
+	inFlight := &domain.EnvDeployment{
+		ApplicationID: 1, Env: domain.EnvironmentProd, Branch: "master",
+		RollbackOfID: bad.ID, Status: domain.EnvDeploymentStatusRunning, StartedAt: time.Now().UTC(),
+	}
+	if err := db.Create(inFlight).Error; err != nil {
+		t.Fatalf("create in-flight rollback: %v", err)
+	}
+
+	if _, err := app.RollbackEnv(ctx, bad.ID, "bob"); err == nil {
+		t.Fatal("RollbackEnv started a second rollback while one was still running")
+	}
+
+	// Once that rollback finishes, the batch is rollback-able again — the guard
+	// is against concurrency, not a permanent one-rollback-per-deploy rule.
+	if err := db.Model(inFlight).Update("status", domain.EnvDeploymentStatusSuccess).Error; err != nil {
+		t.Fatalf("finish in-flight rollback: %v", err)
+	}
+	got, err := app.envDeploySvc.GetUnfinishedRollbackOf(ctx, bad.ID)
+	if err != nil {
+		t.Fatalf("GetUnfinishedRollbackOf: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("a finished rollback still blocks: #%d", got.ID)
+	}
+}
+
 func TestRollbackBatchPin(t *testing.T) {
 	pair := func(branch, sha string) service.EnvRollbackPair {
 		return service.EnvRollbackPair{

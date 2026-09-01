@@ -295,7 +295,7 @@ func (a *ReleaseApplication) Resume(ctx context.Context, releaseID int64) (*doma
 // Rollback/Retry/Verify calls, so a failed Deploy would leave it stuck
 // forever. Triggering Deploy first means a failure here leaves badReleaseID
 // completely untouched and the whole call can just be retried.
-func (a *ReleaseApplication) Rollback(ctx context.Context, badReleaseID, targetReleaseID int64) (*domain.ApplicationRelease, error) {
+func (a *ReleaseApplication) Rollback(ctx context.Context, badReleaseID, targetReleaseID int64, operator string) (*domain.ApplicationRelease, error) {
 	logger.L().Info("release: rollback requested", zap.Int64("bad_release_id", badReleaseID), zap.Int64("target_release_id", targetReleaseID))
 	bad, err := a.releaseSvc.Get(ctx, badReleaseID)
 	if err != nil {
@@ -308,7 +308,7 @@ func (a *ReleaseApplication) Rollback(ctx context.Context, badReleaseID, targetR
 	if err != nil {
 		return nil, err
 	}
-	newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, bad, target, 0)
+	newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, bad, target, 0, operator)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func (a *ReleaseApplication) VerifyEnv(ctx context.Context, batchID int64) (*dom
 // no earlier verified release. Once the plan is accepted the fan-out is
 // best-effort per instance, exactly like DeployEnv: one instance failing to
 // start does not hold up the others, and the batch aggregate records it.
-func (a *ReleaseApplication) RollbackEnv(ctx context.Context, batchID int64) (*domain.EnvDeployment, error) {
+func (a *ReleaseApplication) RollbackEnv(ctx context.Context, batchID int64, operator string) (*domain.EnvDeployment, error) {
 	logger.L().Info("release: env rollback requested", zap.Int64("batch_id", batchID))
 	if a.envDeploySvc == nil {
 		return nil, errors.New("env deployments are not enabled in this build")
@@ -383,6 +383,14 @@ func (a *ReleaseApplication) RollbackEnv(ctx context.Context, batchID int64) (*d
 	bad, err := a.envDeploySvc.Get(ctx, batchID)
 	if err != nil {
 		return nil, err
+	}
+	// A double-submitted rollback would otherwise plan twice against children
+	// that are all still pending_verify, create two batches, and leave the
+	// instances racing on their own deploy locks.
+	if inFlight, err := a.envDeploySvc.GetUnfinishedRollbackOf(ctx, batchID); err != nil {
+		return nil, err
+	} else if inFlight != nil {
+		return nil, errors.New("deploy " + strconv.FormatInt(batchID, 10) + " is already being rolled back by deploy " + strconv.FormatInt(inFlight.ID, 10))
 	}
 	pairs, err := a.releaseSvc.PlanEnvRollback(ctx, bad.Releases)
 	if err != nil {
@@ -396,7 +404,7 @@ func (a *ReleaseApplication) RollbackEnv(ctx context.Context, batchID int64) (*d
 		Branch:        branch,
 		CommitSHA:     commitSHA,
 		RollbackOfID:  bad.ID,
-		Operator:      bad.Operator,
+		Operator:      operator,
 		Status:        domain.EnvDeploymentStatusRunning,
 		TotalCount:    len(pairs),
 	}
@@ -405,7 +413,7 @@ func (a *ReleaseApplication) RollbackEnv(ctx context.Context, batchID int64) (*d
 	}
 
 	for _, pair := range pairs {
-		newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, pair.Bad, pair.Target, batch.ID)
+		newRel, err := a.releaseSvc.CreateRollbackDraft(ctx, pair.Bad, pair.Target, batch.ID, operator)
 		if err != nil {
 			logger.L().Error("release: env rollback child draft failed",
 				zap.Int64("batch_id", batch.ID), zap.String("instance", pair.Bad.InstanceName), zap.Error(err))

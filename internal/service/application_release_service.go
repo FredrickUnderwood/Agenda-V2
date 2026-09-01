@@ -203,7 +203,10 @@ func (s *ApplicationReleaseService) ResolveRollbackTarget(ctx context.Context, b
 // CreateRollbackDraft builds (and persists as draft) a new release that
 // redeploys target's commit, linked back to the release it supersedes.
 // envDeploymentID groups it under an env-wide rollback batch, or is 0 for a
-// single-instance rollback.
+// single-instance rollback. operator is whoever asked for the rollback, falling
+// back to the superseded release's operator when the caller has no identity —
+// attributing a rollback to whoever ran the bad deploy would misread deploy
+// history exactly when someone needs to trust it.
 //
 // Only the commit is rolled back — the new release snapshots the application's
 // *current* deploy config, environment variables and gateway routes, exactly
@@ -211,7 +214,7 @@ func (s *ApplicationReleaseService) ResolveRollbackTarget(ctx context.Context, b
 // silently reverting changes an operator may have made deliberately since, and
 // there is no way to tell the two apart from here; an operator who wants the
 // old configuration back edits it and deploys again.
-func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad, target *domain.ApplicationRelease, envDeploymentID int64) (*domain.ApplicationRelease, error) {
+func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad, target *domain.ApplicationRelease, envDeploymentID int64, operator string) (*domain.ApplicationRelease, error) {
 	app, err := s.apps.GetByID(ctx, bad.ApplicationID)
 	if err != nil {
 		return nil, err
@@ -223,7 +226,10 @@ func (s *ApplicationReleaseService) CreateRollbackDraft(ctx context.Context, bad
 	if !envTarget.Enabled {
 		return nil, errors.New(fmt.Sprintf("%s/%s target is disabled", bad.Env, bad.InstanceName))
 	}
-	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, bad.Operator, envDeploymentID)
+	if operator == "" {
+		operator = bad.Operator
+	}
+	rel, err := s.buildDraft(ctx, app, envTarget, target.Branch, target.CommitSHA, operator, envDeploymentID)
 	if err != nil {
 		return nil, err
 	}
@@ -256,14 +262,23 @@ type EnvRollbackPair struct {
 // replacing anything, and an already rolled_back one has been dealt with. A
 // child still deploying does fail the plan — its outcome is not yet known, so
 // neither rolling it back nor ignoring it is defensible.
+//
+// A rolling_back child is planned again rather than refused. rolling_back only
+// records that a replacement was once started, and nothing ever clears it if
+// that replacement then failed — so refusing here would make one failed
+// rollback permanently block every future rollback of the whole environment,
+// with the instance still running the bad code. Replaying it is safe: if the
+// earlier replacement is genuinely still in flight, the per-instance deploy
+// lock rejects the new one (RollbackEnv records that child as failed and the
+// batch reports it), which is recoverable, unlike a dead end.
 func (s *ApplicationReleaseService) PlanEnvRollback(ctx context.Context, children []*domain.ApplicationRelease) ([]EnvRollbackPair, error) {
 	pairs := make([]EnvRollbackPair, 0, len(children))
 	for _, child := range children {
 		switch child.Status {
 		case domain.ReleaseStatusDraft, domain.ReleaseStatusFailed, domain.ReleaseStatusRolledBack:
 			continue
-		case domain.ReleaseStatusDeploying, domain.ReleaseStatusRollingBack:
-			return nil, errors.New(fmt.Sprintf("instance %s is still %s; wait for it to settle before rolling back", child.InstanceName, child.Status))
+		case domain.ReleaseStatusDeploying:
+			return nil, errors.New(fmt.Sprintf("instance %s is still deploying; wait for it to finish before rolling back", child.InstanceName))
 		}
 		target, err := s.ResolveRollbackTarget(ctx, child.ID, 0)
 		if err != nil {

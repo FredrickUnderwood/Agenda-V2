@@ -17,16 +17,24 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
 
-// ResolveHeadSHA returns the full 40-character SHA currently checked out at
-// localPath on the target machine. machine == nil means execute locally.
+// ResolveSHA expands rev (a commit pin, possibly abbreviated, or "HEAD") to its
+// full 40-character object name using the repository at localPath on the target
+// machine. machine == nil means execute locally.
 //
-// This is what a deploy records as the commit it shipped, for both the pinned
-// and the unpinned case: reading it back off the working tree (rather than
-// re-deriving it from the remote) means the recorded SHA is always the object
-// the build actually ran against, and is always the full object name even when
-// the operator pinned an abbreviation. A later rollback can therefore feed the
-// stored value straight back into Pull with no further resolution.
-func ResolveHeadSHA(ctx context.Context, localPath string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
+// A deploy records what this returns as the commit it shipped. Callers pass the
+// pin they asked for rather than "HEAD" whenever there is one: instances of the
+// same app+branch on one machine share localPath (see git.ResolveLocalPath), so
+// a sibling instance's concurrent `reset --hard` can move HEAD out from under a
+// run, and resolving the pin keeps the recorded SHA the one that was requested
+// instead of whatever the shared tree happens to point at. "HEAD" is only right
+// when nothing was pinned and the branch tip is genuinely the answer.
+//
+// --verify ... ^{commit} makes git fail loudly on an unknown or ambiguous
+// abbreviation instead of echoing the input back and exiting non-zero.
+func ResolveSHA(ctx context.Context, localPath, rev string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
+	if rev == "" {
+		rev = "HEAD"
+	}
 	gitBin := cfg.Git.GitBin
 	if gitBin == "" {
 		gitBin = "git"
@@ -34,22 +42,23 @@ func ResolveHeadSHA(ctx context.Context, localPath string, cfg *config.Config, m
 
 	r := runner.New(machine)
 	var buf bytes.Buffer
-	if err := r.RunCmd(ctx, "", gitBin, []string{"-C", localPath, "rev-parse", "HEAD"}, &buf); err != nil {
+	if err := r.RunCmd(ctx, "", gitBin, []string{"-C", localPath, "rev-parse", "--verify", rev + "^{commit}"}, &buf); err != nil {
 		out := redactTokens(strings.TrimSpace(buf.String()), cfg)
-		logger.L().Error("git rev-parse HEAD failed",
+		logger.L().Error("git rev-parse failed",
 			zap.String("local_path", localPath),
+			zap.String("rev", rev),
 			zap.String("output", out),
 			zap.Error(err),
 		)
 		if out != "" {
-			return "", errors.New("git rev-parse: " + out)
+			return "", errors.New("git rev-parse " + rev + ": " + out)
 		}
 		return "", err
 	}
 
 	sha := strings.TrimSpace(buf.String())
 	if sha == "" {
-		return "", errors.New("git rev-parse HEAD returned nothing for " + localPath)
+		return "", errors.New("git rev-parse returned nothing for " + rev + " in " + localPath)
 	}
 	return sha, nil
 }

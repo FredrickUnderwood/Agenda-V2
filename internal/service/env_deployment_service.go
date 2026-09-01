@@ -54,6 +54,13 @@ func (s *EnvDeploymentService) List(ctx context.Context, f ListEnvDeploymentsFil
 	return s.batches.List(ctx, f)
 }
 
+// GetUnfinishedRollbackOf returns a not-yet-finished rollback batch superseding
+// id, or nil when there is none. Callers use it to reject a duplicate rollback
+// request before it creates a second batch.
+func (s *EnvDeploymentService) GetUnfinishedRollbackOf(ctx context.Context, id int64) (*domain.EnvDeployment, error) {
+	return s.batches.GetUnfinishedRollbackOf(ctx, id)
+}
+
 // Reconcile recomputes a batch's aggregate status and counts from the current
 // state of its child releases, then persists the snapshot. It is idempotent
 // and race-free under parallel fan-out: because every child calls Reconcile

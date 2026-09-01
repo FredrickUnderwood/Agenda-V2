@@ -156,9 +156,15 @@ func TestCreateRollbackDraftLinksAndSnapshotsCurrentConfig(t *testing.T) {
 	target := seedRelease(t, db, app, "blue", "aaaaaaaaaaaa", domain.ReleaseStatusVerified)
 	bad := seedRelease(t, db, app, "blue", "cccccccccccc", domain.ReleaseStatusPendingVerify)
 
-	rel, err := svc.CreateRollbackDraft(ctx, bad, target, 77)
+	bad.Operator = "alice"
+	rel, err := svc.CreateRollbackDraft(ctx, bad, target, 77, "bob")
 	if err != nil {
 		t.Fatalf("CreateRollbackDraft: %v", err)
+	}
+	// Whoever asked for the rollback owns it — attributing it to whoever ran
+	// the bad deploy would misread deploy history exactly when it matters.
+	if rel.Operator != "bob" {
+		t.Fatalf("operator = %q, want the caller who asked for the rollback", rel.Operator)
 	}
 	if rel.CommitSHA != target.CommitSHA {
 		t.Fatalf("commit_sha = %q, want the target's %q", rel.CommitSHA, target.CommitSHA)
@@ -234,6 +240,26 @@ func TestPlanEnvRollbackRefusesInFlightInstances(t *testing.T) {
 
 	if _, err := svc.PlanEnvRollback(ctx, []*domain.ApplicationRelease{deploying}); err == nil {
 		t.Fatal("PlanEnvRollback accepted a release that is still deploying")
+	}
+}
+
+// rolling_back records only that a replacement was once started, and nothing
+// clears it when that replacement fails. Refusing to plan it would leave the
+// instance running the bad code with no way to retry from here.
+func TestPlanEnvRollbackReplaysAStuckRollback(t *testing.T) {
+	svc, db := newRollbackTestService(t)
+	app := seedRollbackApp(t, db)
+	ctx := context.Background()
+
+	good := seedRelease(t, db, app, "blue", "aaaaaaaaaaaa", domain.ReleaseStatusVerified)
+	stuck := seedRelease(t, db, app, "blue", "cccccccccccc", domain.ReleaseStatusRollingBack)
+
+	pairs, err := svc.PlanEnvRollback(ctx, []*domain.ApplicationRelease{stuck})
+	if err != nil {
+		t.Fatalf("PlanEnvRollback refused a stuck rollback: %v", err)
+	}
+	if len(pairs) != 1 || pairs[0].Target.ID != good.ID {
+		t.Fatalf("plan = %+v, want blue replanned onto #%d", pairs, good.ID)
 	}
 }
 

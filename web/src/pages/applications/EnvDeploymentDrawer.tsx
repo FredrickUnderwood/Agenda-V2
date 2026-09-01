@@ -33,6 +33,12 @@ export function EnvDeploymentDrawer({
     refetchInterval: (query) => (query.state.data && isInFlight(query.state.data.status) ? 2000 : false),
   })
 
+  const children = data?.releases ?? []
+  const awaitingVerify = children.filter((r) => r.status === 'pending_verify').length
+  // Mirrors the server's plan: an instance can be rolled back once its release
+  // actually reached it. A batch where every child failed has nothing to undo.
+  const rollbackable = children.filter((r) => r.status === 'pending_verify' || r.status === 'verified').length
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['env-deployments'] })
     queryClient.invalidateQueries({ queryKey: ['releases'] })
@@ -40,11 +46,12 @@ export function EnvDeploymentDrawer({
 
   const verifyMutation = useMutation({
     mutationFn: () => api.verifyEnvDeployment(deploymentId!),
-    onSuccess: (batch) => {
-      // Count off the returned batch rather than reporting total_count: a batch
-      // can contain instances that failed and were never verifiable.
-      const verified = (batch.releases ?? []).filter((r) => r.status === 'verified').length
-      message.success(`Verified ${verified} ${verified === 1 ? 'instance' : 'instances'}.`)
+    onSuccess: () => {
+      // awaitingVerify is the pre-click count, which is exactly what the server
+      // verifies. Counting 'verified' off the response would instead report
+      // every instance in the batch that is now verified, including ones that
+      // were already verified individually before this click.
+      message.success(`Verified ${awaitingVerify} ${awaitingVerify === 1 ? 'instance' : 'instances'}.`)
       invalidate()
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
@@ -62,12 +69,6 @@ export function EnvDeploymentDrawer({
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
-
-  const children = data?.releases ?? []
-  const awaitingVerify = children.filter((r) => r.status === 'pending_verify').length
-  // Mirrors the server's plan: an instance can be rolled back once its release
-  // actually reached it. A batch where every child failed has nothing to undo.
-  const rollbackable = children.filter((r) => r.status === 'pending_verify' || r.status === 'verified').length
 
   const confirmRollback = () => {
     modal.confirm({

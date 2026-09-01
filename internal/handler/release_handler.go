@@ -163,7 +163,7 @@ func (s *Server) rollbackRelease(c *gin.Context) {
 	}
 	var req rollbackReleaseRequest
 	_ = c.ShouldBindJSON(&req)
-	rel, err := s.releaseApp.Rollback(c.Request.Context(), id, req.TargetReleaseID)
+	rel, err := s.releaseApp.Rollback(c.Request.Context(), id, req.TargetReleaseID, currentOperator(c))
 	if err != nil {
 		FailWith(c, http.StatusBadRequest, err)
 		return

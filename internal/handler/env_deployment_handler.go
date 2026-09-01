@@ -85,7 +85,7 @@ func (s *Server) rollbackEnvDeployment(c *gin.Context) {
 		FailMessage(c, http.StatusBadRequest, "invalid deployment ID")
 		return
 	}
-	batch, err := s.releaseApp.RollbackEnv(c.Request.Context(), id)
+	batch, err := s.releaseApp.RollbackEnv(c.Request.Context(), id, currentOperator(c))
 	if err != nil {
 		FailWith(c, http.StatusBadRequest, err)
 		return
