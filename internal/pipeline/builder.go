@@ -510,6 +510,11 @@ func (b *Builder) buildAPI(target *domain.DeployTarget) ([]Blueprint, string, er
 // resolveLocalPath picks the workspace root for the run: machine.WorkspaceRoot
 // when set, otherwise the global Config.WorkspaceRoot. ~ is only expanded for
 // local execution (machine.IsLocal()) — remote machines must use absolute paths.
+//
+// The checkout is per (app, env, instance, branch): a run resets its tree to a
+// specific commit and builds from it, and instances of one app resolve their
+// commits independently (a rollback gives siblings different ones), so they
+// must not share a working tree. See git.ResolveInstanceCodeDir.
 func (b *Builder) resolveLocalPath(target *domain.DeployTarget, machine *config.MachineConfig) (string, error) {
 	root := ""
 	if machine != nil {
@@ -518,7 +523,8 @@ func (b *Builder) resolveLocalPath(target *domain.DeployTarget, machine *config.
 	if root == "" {
 		root = b.cfg.WorkspaceRoot
 	}
-	return git.ResolveLocalPath(target.App.RepoURL, target.Branch, root, machine.IsLocal())
+	return git.ResolveInstanceCodeDir(
+		root, target.App.Name, string(target.Env()), targetInstanceName(target), target.Branch, machine.IsLocal())
 }
 
 // resolveInstanceLogDir picks the same workspace root as resolveLocalPath but

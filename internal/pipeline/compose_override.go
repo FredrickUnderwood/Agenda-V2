@@ -19,14 +19,14 @@ import (
 // agendaOverrideRelPath is the override file path under LocalPath, kept under a
 // dot-prefixed dir so it doesn't pollute the user's repo working tree.
 //
-// It MUST be keyed by projectName: instances of the same app+branch on one
-// machine share LocalPath (git.ResolveLocalPath keys on repo+branch+machine,
-// not instance), so a single fixed filename here lets concurrent per-instance
-// deploys — e.g. an env-wide parallel batch (blue + default at once) — clobber
-// each other's override file. The loser's `docker compose up` then reads the
-// winner's override and comes up with the WRONG AGENDA_INSTANCE_NAME and log-dir
-// mount. projectName is unique per app-branch-env-instance, so each instance
-// writes (and `-f`-references) its own file.
+// It is keyed by projectName. Checkouts are now per-instance
+// (git.ResolveInstanceCodeDir), so two instances no longer write into the same
+// directory and the clobbering this originally guarded against — a parallel
+// env-wide batch where the loser's `docker compose up` read the winner's
+// override and came up with the WRONG AGENDA_INSTANCE_NAME and log-dir mount —
+// can no longer happen from that direction. The keying stays: it costs nothing,
+// it keeps the file self-describing on disk, and it means the override is still
+// unambiguous if a checkout is ever shared again.
 func agendaOverrideRelPath(projectName string) string {
 	return ".agenda/compose.override." + projectName + ".yml"
 }

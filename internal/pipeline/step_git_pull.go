@@ -23,11 +23,8 @@ func (s *GitPullStep) Execute(ctx context.Context, rc *RunContext) error {
 	// Expand whatever was asked for into a full object name, using the pin when
 	// there is one and the checked-out HEAD only when there isn't. The release
 	// records this value (see MarkDeploySucceeded) and a later rollback re-pins
-	// it verbatim, so it has to be the commit this deploy asked for: resolving
-	// HEAD unconditionally would let a sibling instance sharing this checkout
-	// (see git.ResolveLocalPath) move it between the pull and the read, and the
-	// wrong SHA recorded here would silently mis-target every future rollback of
-	// this instance.
+	// it verbatim, so it must be the commit this deploy asked for rather than
+	// whatever the tree points at by the time this runs.
 	sha, err := git.ResolveSHA(ctx, rc.LocalPath, rc.CommitSHA, rc.Cfg, s.Machine)
 	if err != nil {
 		return err
