@@ -2,6 +2,7 @@ package git
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +127,65 @@ func TestEnvFilesDir_CannotCollideWithAnInstanceDir(t *testing.T) {
 	}
 	if files == instance {
 		t.Fatalf("an instance named %q resolves to the files dir %q", "files", files)
+	}
+}
+
+func TestResolveInstanceCodeDir(t *testing.T) {
+	const root = "/srv/agenda"
+
+	got, err := ResolveInstanceCodeDir(root, "agenda-example", "prod", "blue", "master", false)
+	if err != nil {
+		t.Fatalf("ResolveInstanceCodeDir: %v", err)
+	}
+	if want := "/srv/agenda/src/agenda-example/prod/blue/master"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	// The property the whole layout exists for: two instances of one app on one
+	// branch must never resolve to the same working tree, because a rollback
+	// gives them different commits to reset to and build from.
+	blue, err := ResolveInstanceCodeDir(root, "agenda-example", "prod", "blue", "master", false)
+	if err != nil {
+		t.Fatalf("blue: %v", err)
+	}
+	green, err := ResolveInstanceCodeDir(root, "agenda-example", "prod", "green", "master", false)
+	if err != nil {
+		t.Fatalf("green: %v", err)
+	}
+	if blue == green {
+		t.Fatalf("blue and green share a checkout at %q", blue)
+	}
+
+	// Envs are separated too — prod/blue and test/blue are different instances.
+	testBlue, err := ResolveInstanceCodeDir(root, "agenda-example", "test", "blue", "master", false)
+	if err != nil {
+		t.Fatalf("test blue: %v", err)
+	}
+	if testBlue == blue {
+		t.Fatalf("prod and test share a checkout at %q", blue)
+	}
+}
+
+// A branch is operator-supplied and lands in a filesystem path, so it must not
+// be able to walk out of the workspace.
+func TestResolveInstanceCodeDirContainsTraversalInBranch(t *testing.T) {
+	got, err := ResolveInstanceCodeDir("/srv/agenda", "app", "prod", "blue", "../../../etc", false)
+	if err != nil {
+		t.Fatalf("ResolveInstanceCodeDir: %v", err)
+	}
+	if !strings.HasPrefix(got, "/srv/agenda/src/") {
+		t.Fatalf("branch escaped the workspace: %q", got)
+	}
+}
+
+func TestResolveInstanceCodeDirRejectsIncompleteIdentity(t *testing.T) {
+	if _, err := ResolveInstanceCodeDir("/srv/agenda", "app", "prod", "blue", "", false); err == nil {
+		t.Fatal("accepted an empty branch")
+	}
+	if _, err := ResolveInstanceCodeDir("/srv/agenda", "", "prod", "blue", "master", false); err == nil {
+		t.Fatal("accepted an empty app")
+	}
+	if _, err := ResolveInstanceCodeDir("relative/root", "app", "prod", "blue", "master", false); err == nil {
+		t.Fatal("accepted a relative workspace root")
 	}
 }

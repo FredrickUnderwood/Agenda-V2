@@ -20,13 +20,14 @@ func (s *GitPullStep) Execute(ctx context.Context, rc *RunContext) error {
 	if err := git.Pull(ctx, app.RepoURL, rc.LocalPath, rc.Branch, rc.CommitSHA, rc.Cfg, s.Machine); err != nil {
 		return err
 	}
-	sha := rc.CommitSHA
-	if sha == "" {
-		resolved, err := git.FetchRemoteSHA(ctx, app.RepoURL, rc.Branch, rc.Cfg, s.Machine)
-		if err != nil {
-			return err
-		}
-		sha = resolved
+	// Expand whatever was asked for into a full object name, using the pin when
+	// there is one and the checked-out HEAD only when there isn't. The release
+	// records this value (see MarkDeploySucceeded) and a later rollback re-pins
+	// it verbatim, so it must be the commit this deploy asked for rather than
+	// whatever the tree points at by the time this runs.
+	sha, err := git.ResolveSHA(ctx, rc.LocalPath, rc.CommitSHA, rc.Cfg, s.Machine)
+	if err != nil {
+		return err
 	}
 	rc.Log.TriggerSHA = sha
 	_, _ = rc.Output.WriteString("pulled branch " + rc.Branch + " (commit " + sha + ") into " + rc.LocalPath + "\n")

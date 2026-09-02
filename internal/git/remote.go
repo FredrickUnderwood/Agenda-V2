@@ -17,14 +17,22 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/internal/util"
 )
 
-// FetchRemoteSHA returns the current commit SHA of the given branch.
-// machine == nil means execute locally.
-func FetchRemoteSHA(ctx context.Context, repoURL, branch string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
-	authedURL, err := injectToken(repoURL, cfg)
-	if err != nil {
-		return "", err
+// ResolveSHA expands rev (a commit pin, possibly abbreviated, or "HEAD") to its
+// full 40-character object name using the repository at localPath on the target
+// machine. machine == nil means execute locally.
+//
+// A deploy records what this returns as the commit it shipped. Callers pass the
+// pin they asked for rather than "HEAD" whenever there is one, so the recorded
+// SHA is the commit that was requested rather than whatever the tree happens to
+// point at. "HEAD" is only right when nothing was pinned and the branch tip is
+// genuinely the answer.
+//
+// --verify ... ^{commit} makes git fail loudly on an unknown or ambiguous
+// abbreviation instead of echoing the input back and exiting non-zero.
+func ResolveSHA(ctx context.Context, localPath, rev string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
+	if rev == "" {
+		rev = "HEAD"
 	}
-
 	gitBin := cfg.Git.GitBin
 	if gitBin == "" {
 		gitBin = "git"
@@ -32,29 +40,25 @@ func FetchRemoteSHA(ctx context.Context, repoURL, branch string, cfg *config.Con
 
 	r := runner.New(machine)
 	var buf bytes.Buffer
-	if err := r.RunCmd(ctx, "", gitBin, []string{"ls-remote", "--heads", authedURL, "refs/heads/" + branch}, &buf); err != nil {
+	if err := r.RunCmd(ctx, "", gitBin, []string{"-C", localPath, "rev-parse", "--verify", rev + "^{commit}"}, &buf); err != nil {
 		out := redactTokens(strings.TrimSpace(buf.String()), cfg)
-		logger.L().Error("git ls-remote failed",
-			zap.String("repo_url", repoURL),
-			zap.String("branch", branch),
+		logger.L().Error("git rev-parse failed",
+			zap.String("local_path", localPath),
+			zap.String("rev", rev),
 			zap.String("output", out),
 			zap.Error(err),
 		)
 		if out != "" {
-			return "", errors.New("git ls-remote: " + out)
+			return "", errors.New("git rev-parse " + rev + ": " + out)
 		}
 		return "", err
 	}
 
-	line := strings.TrimSpace(buf.String())
-	if line == "" {
-		return "", errors.New("branch " + branch + " not found on remote")
+	sha := strings.TrimSpace(buf.String())
+	if sha == "" {
+		return "", errors.New("git rev-parse returned nothing for " + rev + " in " + localPath)
 	}
-	parts := strings.Fields(line)
-	if len(parts) < 1 {
-		return "", errors.New("unexpected ls-remote output: " + line)
-	}
-	return parts[0], nil
+	return sha, nil
 }
 
 // Pull clones or updates the repo at localPath on the target machine, then
@@ -200,9 +204,16 @@ func redactTokens(s string, cfg *config.Config) string {
 	return s
 }
 
-// ResolveLocalPath derives the on-machine clone directory for a (repoURL, branch)
-// pair, rooted at the configured workspace root:
-// <root>/<host>/<repo path>/<branch>.
+// ResolveLocalPath derives the PRE-INSTANCE-ISOLATION clone directory for a
+// (repoURL, branch) pair: <root>/<host>/<repo path>/<branch>.
+//
+// Deploys no longer use this — they use ResolveInstanceCodeDir, which gives each
+// instance its own checkout. It survives as the resolver for the one thing that
+// must still address the old layout: reading logs an instance wrote inside its
+// code checkout before the run/ layout existed (see
+// ApplicationLogService.legacyInstanceLogs). Do not reach for it in new code,
+// and do not "fix" it to include the instance — that would make the back-compat
+// path point somewhere that has never existed.
 //
 // expandTilde controls whether a leading "~" in root is resolved against the
 // controller's HOME; pass true only for local execution.
@@ -221,9 +232,57 @@ func ResolveLocalPath(repoURL, branch, root string, expandTilde bool) (string, e
 	return filepath.Join(root, host, repoPath, branch), nil
 }
 
+// srcSubtree is the fixed subdirectory under the workspace root that holds
+// per-instance code checkouts. Like runSubtree it is a fixed name at the top of
+// the workspace, which is what keeps it from colliding with the legacy layout's
+// <host> directories.
+const srcSubtree = "src"
+
+// ResolveInstanceCodeDir derives the on-machine clone directory for one
+// instance's checkout of one branch:
+// <root>/src/<app>/<env>/<instance>/<branch>.
+//
+// The instance is in the path because a deploy checks out a specific commit
+// with `git reset --hard` and then builds from that tree. The old layout keyed
+// the directory on (repo, branch) only, so two instances of the same app and
+// branch on one machine shared a working tree while holding only their own
+// per-instance deploy locks. That was survivable while every instance of a
+// batch deployed the same commit, but a rollback resolves each instance's
+// target independently: blue rolling back to one commit while green rolls back
+// to another would have them resetting and building the same directory
+// concurrently, so an instance could build the other's code. git.Pull's
+// recovery path (rm -rf and re-clone) could also delete a sibling's tree
+// mid-build.
+//
+// The branch stays the leaf so switching branches does not force a re-clone,
+// and everything is slugged - branch included, since it is operator-supplied
+// and would otherwise be able to walk out of the workspace with "..".
+//
+// Instances deployed before this layout have their checkout at the legacy
+// ResolveLocalPath location; their next deploy simply clones fresh here, and
+// the stale directory is left alone rather than deleted out from under a
+// running container.
+func ResolveInstanceCodeDir(root, app, env, instance, branch string, expandTilde bool) (string, error) {
+	if branch == "" {
+		return "", errors.New("branch is empty")
+	}
+	root, err := resolveWorkspaceRoot(root, expandTilde)
+	if err != nil {
+		return "", err
+	}
+	if app == "" {
+		return "", errors.New("app is empty")
+	}
+	if instance == "" {
+		instance = "default"
+	}
+	return filepath.Join(root, srcSubtree, util.Slug(app), util.Slug(env), util.Slug(instance), util.Slug(branch)), nil
+}
+
 // runSubtree is the fixed subdirectory under the workspace root that holds
 // per-instance runtime state (logs, build artifacts) — kept separate from the
-// per-branch code checkouts (which live at <root>/<host>/<repo>/<branch>) so a
+// per-instance code checkouts (which live under <root>/src, see
+// ResolveInstanceCodeDir) so a
 // re-clone (rm -rf of a checkout) can never wipe an instance's logs, and so the
 // path is keyed on the stable (app, env, instance) identity rather than the
 // volatile branch. See InstanceLogDir.

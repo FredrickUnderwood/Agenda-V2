@@ -161,6 +161,8 @@ func (s *Server) registerRoutes() {
 	envDeployments := v1.Group("/env-deployments")
 	{
 		envDeployments.GET("/:deploymentID", s.getEnvDeployment)
+		envDeployments.POST("/:deploymentID/verify", s.verifyEnvDeployment)
+		envDeployments.POST("/:deploymentID/rollback", s.rollbackEnvDeployment)
 	}
 
 	releases := v1.Group("/releases")

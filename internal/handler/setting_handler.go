@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/FredrickUnderwood/agenda-v2/internal/auth"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
@@ -64,6 +65,17 @@ func (s *Server) deleteSetting(c *gin.Context) {
 		return
 	}
 	NoContent(c)
+}
+
+// currentOperator returns the authenticated caller's username, for the
+// "who did this" field on records the platform writes on their behalf. Empty
+// when auth is not configured (dev mode) or the caller is a service token —
+// callers fall back to their own default rather than inventing a name.
+func currentOperator(c *gin.Context) string {
+	if id, ok := auth.GetIdentity(c); ok {
+		return id.Username
+	}
+	return ""
 }
 
 // currentUserID returns the authenticated user's id, or 0 when built-in auth is

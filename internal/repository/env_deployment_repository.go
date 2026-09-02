@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -58,6 +59,28 @@ func (r *EnvDeploymentRepository) List(ctx context.Context, f ListEnvDeployments
 		return nil, err
 	}
 	return out, nil
+}
+
+// GetUnfinishedRollbackOf returns a rollback batch that already supersedes
+// batchID and has not reached a terminal status, or (nil, nil) when there is
+// none. It is the guard against a double-submitted rollback: two concurrent
+// requests would otherwise both plan against children that are still
+// pending_verify, create two batches, and race on each instance's deploy lock.
+func (r *EnvDeploymentRepository) GetUnfinishedRollbackOf(ctx context.Context, batchID int64) (*domain.EnvDeployment, error) {
+	var d domain.EnvDeployment
+	err := r.db.WithContext(ctx).
+		Where("rollback_of_id = ? AND status IN ?", batchID,
+			[]domain.EnvDeploymentStatus{domain.EnvDeploymentStatusPending, domain.EnvDeploymentStatusRunning}).
+		Order("id DESC").
+		First(&d).Error
+	if err == nil {
+		return &d, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	logger.L().Error("failed to look up in-flight rollback batch", zap.Int64("rollback_of_id", batchID), zap.Error(err))
+	return nil, err
 }
 
 // UpdateAggregate writes the derived status + counts (+ finished_at once

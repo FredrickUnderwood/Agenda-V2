@@ -268,6 +268,10 @@ export interface EnvDeployment {
   env: Environment
   branch: string
   commit_sha: string
+  // 0 for an ordinary rollout; otherwise the deploy this one was created to
+  // roll back. Instances can roll back to different commits, so commit_sha is
+  // only set on a rollback batch when every instance agreed on one.
+  rollback_of_id: number
   operator: string
   status: EnvDeploymentStatus
   total_count: number

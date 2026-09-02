@@ -67,6 +67,18 @@ export function createEnvDeployment(appId: number, req: CreateEnvDeploymentReque
   return apiClient.post<EnvDeployment>(`/applications/${appId}/env-deployments`, req).then((r) => r.data)
 }
 
+// Batch-level counterparts of verifyRelease/rollbackRelease: an operator checks
+// out (or gives up on) a rollout once, not once per instance.
+export function verifyEnvDeployment(id: number) {
+  return apiClient.post<EnvDeployment>(`/env-deployments/${id}/verify`).then((r) => r.data)
+}
+
+// Returns the NEW batch created to roll the given one back, not the batch that
+// was rolled back.
+export function rollbackEnvDeployment(id: number) {
+  return apiClient.post<EnvDeployment>(`/env-deployments/${id}/rollback`).then((r) => r.data)
+}
+
 export function getEnvDeployment(id: number) {
   return apiClient.get<EnvDeployment>(`/env-deployments/${id}`).then((r) => r.data)
 }

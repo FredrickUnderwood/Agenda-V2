@@ -101,6 +101,35 @@ func (r *ApplicationReleaseRepository) GetLatestVerified(ctx context.Context, ap
 	return nil, err
 }
 
+// GetPreviousVerified returns the most recent verified release for
+// (application_id, env, instance_name) that was created before beforeID —
+// i.e. "the last known-good version this instance ran before the one we are
+// rolling back". Returns (nil, nil) when there is none.
+//
+// Ordering and the cutoff are both on id rather than verified_at, because id
+// is the deploy order and verified_at is not: an operator can verify an older
+// release after a newer one (or a rollback batch can verify several releases
+// within the same second), which would make a verified_at ordering pick a
+// release that is not actually the predecessor.
+func (r *ApplicationReleaseRepository) GetPreviousVerified(ctx context.Context, appID int64, env domain.Environment, instanceName string, beforeID int64) (*domain.ApplicationRelease, error) {
+	var rel domain.ApplicationRelease
+	err := r.db.WithContext(ctx).
+		Where("application_id = ? AND env = ? AND instance_name = ? AND status = ? AND id < ?",
+			appID, env, domain.NormalizeInstanceName(instanceName), domain.ReleaseStatusVerified, beforeID).
+		Order("id DESC").
+		First(&rel).Error
+	if err == nil {
+		return &rel, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	logger.L().Error("failed to get previous verified release",
+		zap.Int64("application_id", appID), zap.String("env", string(env)),
+		zap.String("instance_name", instanceName), zap.Int64("before_id", beforeID), zap.Error(err))
+	return nil, err
+}
+
 // updateStatusAllowedColumns are the only columns UpdateStatus's extra map
 // may touch, alongside status itself. Enforced (not just documented) so a
 // future service-layer call can't accidentally write an arbitrary column —

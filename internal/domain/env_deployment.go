@@ -29,18 +29,24 @@ const DefaultBranch = "master"
 // (see EnvDeploymentService.Reconcile), never authored directly by the child
 // runs — so it is race-free under parallel fan-out.
 type EnvDeployment struct {
-	ID            int64               `json:"id"             gorm:"primaryKey;autoIncrement"`
-	ApplicationID int64               `json:"application_id" gorm:"index;not null"`
-	Env           Environment         `json:"env"            gorm:"index;size:16;not null"`
-	Branch        string              `json:"branch"         gorm:"size:128;not null;default:''"`
-	CommitSHA     string              `json:"commit_sha"     gorm:"size:64;not null;default:''"`
-	Operator      string              `json:"operator"       gorm:"size:128;not null;default:''"`
-	Status        EnvDeploymentStatus `json:"status"         gorm:"size:16;not null;default:pending"`
-	TotalCount    int                 `json:"total_count"    gorm:"not null;default:0"`
-	SuccessCount  int                 `json:"success_count"  gorm:"not null;default:0"`
-	FailedCount   int                 `json:"failed_count"   gorm:"not null;default:0"`
-	StartedAt     time.Time           `json:"started_at"     gorm:"index:idx_env_deployment_started,sort:desc;not null"`
-	FinishedAt    *time.Time          `json:"finished_at"`
+	ID            int64       `json:"id"             gorm:"primaryKey;autoIncrement"`
+	ApplicationID int64       `json:"application_id" gorm:"index;not null"`
+	Env           Environment `json:"env"            gorm:"index;size:16;not null"`
+	Branch        string      `json:"branch"         gorm:"size:128;not null;default:''"`
+	CommitSHA     string      `json:"commit_sha"     gorm:"size:64;not null;default:''"`
+	// RollbackOfID is the batch this one was created to roll back, or 0 for an
+	// ordinary rollout. A rollback batch is a normal EnvDeployment in every
+	// other respect — it fans out to the same instances and reconciles the same
+	// way — this field only records why it exists, so the UI can label it and
+	// an operator reading deploy history can see the pairing.
+	RollbackOfID int64               `json:"rollback_of_id" gorm:"not null;default:0"`
+	Operator     string              `json:"operator"       gorm:"size:128;not null;default:''"`
+	Status       EnvDeploymentStatus `json:"status"         gorm:"size:16;not null;default:pending"`
+	TotalCount   int                 `json:"total_count"    gorm:"not null;default:0"`
+	SuccessCount int                 `json:"success_count"  gorm:"not null;default:0"`
+	FailedCount  int                 `json:"failed_count"   gorm:"not null;default:0"`
+	StartedAt    time.Time           `json:"started_at"     gorm:"index:idx_env_deployment_started,sort:desc;not null"`
+	FinishedAt   *time.Time          `json:"finished_at"`
 
 	// Releases is the child per-instance release list, populated by the service
 	// layer for API responses. Not a persisted column.

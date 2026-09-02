@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Form, Input, Modal, Select, Table, Tag } from 'antd'
+import { App, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
 import { RocketOutlined } from '@ant-design/icons'
 import * as api from '@/api/releases'
 import { listApplicationInstances } from '@/api/applications'
@@ -96,7 +96,16 @@ export function ReleasesTab({ appId }: { appId: number }) {
         style={{ marginBottom: 24 }}
         onRow={(record) => ({ onClick: () => setOpenDeploymentId(record.id), style: { cursor: 'pointer' } })}
         columns={[
-          { title: 'Env', dataIndex: 'env', render: (v) => <Tag>{v}</Tag> },
+          {
+            title: 'Env',
+            dataIndex: 'env',
+            render: (v: Environment, r: EnvDeployment) => (
+              <Space size={4}>
+                <Tag>{v}</Tag>
+                {r.rollback_of_id > 0 && <Tag color="orange">rollback</Tag>}
+              </Space>
+            ),
+          },
           { title: 'Branch', dataIndex: 'branch', render: (v) => <span className="agenda-mono">{v}</span> },
           {
             title: 'Instances',
@@ -186,10 +195,31 @@ export function ReleasesTab({ appId }: { appId: number }) {
           <Form.Item name="branch" label="Branch">
             <Input placeholder="master" className="agenda-mono" />
           </Form.Item>
+          <Form.Item
+            name="commit_sha"
+            label="Commit"
+            tooltip="Leave empty to deploy the branch's latest commit"
+            rules={[
+              {
+                // Git resolves an abbreviation as happily as the full object
+                // name, so both are accepted; what gets recorded on the release
+                // is always the full SHA the checkout resolved to. Same bounds
+                // as git.NormalizeCommitSHA on the server.
+                pattern: /^[0-9a-fA-F]{7,40}$/,
+                message: '7–40 hex characters, e.g. 8ce16504d4 or the full 40-character SHA',
+              },
+            ]}
+          >
+            <Input allowClear placeholder="Latest commit on the branch" className="agenda-mono" />
+          </Form.Item>
         </Form>
       </Modal>
 
-      <ReleaseDetailDrawer releaseId={openReleaseId} onClose={() => setOpenReleaseId(null)} />
+      <ReleaseDetailDrawer
+        releaseId={openReleaseId}
+        onClose={() => setOpenReleaseId(null)}
+        onNavigate={setOpenReleaseId}
+      />
       <EnvDeploymentDrawer
         deploymentId={openDeploymentId}
         onClose={() => setOpenDeploymentId(null)}
@@ -197,6 +227,7 @@ export function ReleasesTab({ appId }: { appId: number }) {
           setOpenDeploymentId(null)
           setOpenReleaseId(id)
         }}
+        onNavigate={setOpenDeploymentId}
       />
     </div>
   )
