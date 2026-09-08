@@ -1,9 +1,10 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,8 +24,8 @@ func waitFor(t *testing.T, cond func() bool) {
 
 func TestJobStoreLifecycle(t *testing.T) {
 	s := NewJobStore(1024, time.Hour)
-	s.Dispatch("j1", func(ctx context.Context, buf *bytes.Buffer) error {
-		buf.WriteString("hello output")
+	s.Dispatch("j1", func(ctx context.Context, buf io.Writer) error {
+		io.WriteString(buf, "hello output")
 		return nil
 	})
 	waitFor(t, func() bool {
@@ -39,7 +40,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 
 func TestJobStoreFailurePropagates(t *testing.T) {
 	s := NewJobStore(1024, time.Hour)
-	s.Dispatch("j2", func(ctx context.Context, buf *bytes.Buffer) error {
+	s.Dispatch("j2", func(ctx context.Context, buf io.Writer) error {
 		return errors.New("boom")
 	})
 	waitFor(t, func() bool {
@@ -56,7 +57,7 @@ func TestJobStoreDispatchIdempotent(t *testing.T) {
 	s := NewJobStore(1024, time.Hour)
 	var runs int32
 	block := make(chan struct{})
-	fn := func(ctx context.Context, buf *bytes.Buffer) error {
+	fn := func(ctx context.Context, buf io.Writer) error {
 		atomic.AddInt32(&runs, 1)
 		<-block
 		return nil
@@ -76,7 +77,7 @@ func TestJobStoreDispatchIdempotent(t *testing.T) {
 func TestJobStoreDeleteCancels(t *testing.T) {
 	s := NewJobStore(1024, time.Hour)
 	cancelled := make(chan struct{})
-	s.Dispatch("cancelme", func(ctx context.Context, buf *bytes.Buffer) error {
+	s.Dispatch("cancelme", func(ctx context.Context, buf io.Writer) error {
 		<-ctx.Done()
 		close(cancelled)
 		return ctx.Err()
@@ -95,9 +96,9 @@ func TestJobStoreDeleteCancels(t *testing.T) {
 }
 
 func TestJobStoreOutputCapped(t *testing.T) {
-	s := NewJobStore(10, time.Hour)
-	s.Dispatch("big", func(ctx context.Context, buf *bytes.Buffer) error {
-		buf.WriteString("0123456789ABCDEFGHIJ") // 20 bytes, cap 10
+	s := NewJobStore(32, time.Hour)
+	s.Dispatch("big", func(ctx context.Context, buf io.Writer) error {
+		io.WriteString(buf, strings.Repeat("0123456789", 10)+"ABCDEFGHIJ")
 		return nil
 	})
 	waitFor(t, func() bool {
@@ -105,8 +106,83 @@ func TestJobStoreOutputCapped(t *testing.T) {
 		return st.Status == StatusSuccess
 	})
 	st, _ := s.Get("big")
-	if len(st.Output) <= 10 || st.Output[len(st.Output)-10:] != "ABCDEFGHIJ" {
+	if len(st.Output) > 32 || !strings.HasPrefix(st.Output, "...[truncated]...\n") || !strings.HasSuffix(st.Output, "ABCDEFGHIJ") {
 		t.Fatalf("capped output = %q, want tail ABCDEFGHIJ with marker", st.Output)
+	}
+}
+
+func TestJobStoreRunningOutputSnapshot(t *testing.T) {
+	s := NewJobStore(64, time.Hour)
+	ready, finish := make(chan struct{}), make(chan struct{})
+	defer close(finish)
+	s.Dispatch("progress", func(ctx context.Context, out io.Writer) error {
+		io.WriteString(out, strings.Repeat("old output\n", 1000)+"building dependencies\n")
+		close(ready)
+		<-finish
+		return nil
+	})
+	<-ready
+	st, ok := s.Get("progress")
+	if !ok || st.Status != StatusRunning || !strings.HasSuffix(st.Output, "building dependencies\n") || len(st.Output) > 64 {
+		t.Fatalf("running snapshot = %+v, exists=%v", st, ok)
+	}
+	if again, _ := s.Get("progress"); again.Output != st.Output {
+		t.Fatal("reading a snapshot must not consume it")
+	}
+}
+
+func TestJobStoreReclaimsExpiredOutputWithoutRemovingActiveJobs(t *testing.T) {
+	s := NewJobStore(64, time.Hour)
+	for _, id := range []string{"expired", "recent"} {
+		s.Dispatch(id, func(ctx context.Context, out io.Writer) error {
+			_, err := io.WriteString(out, strings.Repeat("output\n", 1000))
+			return err
+		})
+		waitFor(t, func() bool {
+			st, _ := s.Get(id)
+			return st.Status == StatusSuccess
+		})
+	}
+	s.Dispatch("running", func(ctx context.Context, out io.Writer) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	defer s.Delete("running")
+
+	// A completed job left behind by a failed control-plane DELETE must
+	// eventually release its log buffer, while active/recent jobs stay readable.
+	s.mu.Lock()
+	expired := s.jobs["expired"]
+	s.mu.Unlock()
+	expired.mu.Lock()
+	expired.doneAt = time.Now().Add(-2 * time.Hour)
+	expired.mu.Unlock()
+	s.sweep()
+	if _, ok := s.Get("expired"); ok {
+		t.Fatal("expired job still retains its output in the task table")
+	}
+	for _, id := range []string{"recent", "running"} {
+		if _, ok := s.Get(id); !ok {
+			t.Fatalf("GC removed %s job", id)
+		}
+	}
+}
+
+func TestJobStoreOrphanedJobHasExecutionDeadline(t *testing.T) {
+	s := NewJobStore(64, time.Hour)
+	s.maxJobDuration = 20 * time.Millisecond
+	s.Dispatch("orphan", func(ctx context.Context, out io.Writer) error {
+		io.WriteString(out, "last progress\n")
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	waitFor(t, func() bool {
+		st, _ := s.Get("orphan")
+		return st.Status == StatusFailed
+	})
+	st, _ := s.Get("orphan")
+	if st.Error != context.DeadlineExceeded.Error() || st.Output != "last progress\n" {
+		t.Fatalf("orphaned job = %+v", st)
 	}
 }
 

@@ -323,8 +323,37 @@ func (s *JobStore) Dispatch(id string, run func(ctx context.Context, buf *bytes.
   on an overall ctx timeout / a fully abandoned deploy and does not conflict with
   the normal pause flow.
 
-Output truncation (`max_output_bytes`) is applied when writing to `j.buf`,
-consistent with the control plane's `capOutput` policy — defense in depth.
+Output truncation (`max_output_bytes`) is applied during writes to a thread-safe
+tail buffer, bounding node memory even for long builds. GET returns a tail
+snapshot for running and completed jobs. The control plane replaces its cached
+snapshot on each poll and writes it only once when the command returns; polling
+does not create MySQL writes. On timeout/cancellation it attempts one final GET
+(up to 2 seconds) before deleting the job, falling back to its last snapshot if
+the node is unavailable. Snapshot recovery and deletion share a 5-second budget.
+
+The node retains at most `max_output_bytes` bytes of output per job (default
+64 KiB), and the control plane replaces its previous polling snapshot instead
+of appending snapshots. Normal completion and timeout both attempt to delete the
+node job. If deletion fails, a job has a 30-minute execution deadline; after it
+finishes, GC removes it once its retention expires (default 1 hour, checked every
+30 minutes). These are per-job bounds and expiry rules, not a process-wide memory
+limit: the task table has no maximum job count, and total memory scales with the
+number of active or retained jobs, plus request/serialization allocations.
+
+Each persisted step output contains the last 50 log lines and at most
+`deploy.max_output_bytes` bytes (default 4 KiB). The truncation marker counts
+toward the byte limit, UTF-8 remains valid, and configured limits are clamped to
+4,096 bytes even if an older YAML still requests 16/64 KiB. Failed runs also copy this
+bounded tail to the deployment summary. The failure reason is appended within
+the same budget so the UI can show both progress and the reason for stopping.
+No new log-history rows are created.
+
+Upgrade both the control plane and agenda-node for timeout output recovery;
+older nodes still work but only return output on completion. The default deploy
+timeout is now 20 minutes. Existing YAML files that explicitly set `5m` must be
+updated and the control plane restarted. `deploy.sh` regenerates the quickstart
+control-plane YAML with the new defaults; hand-maintained configs retain their
+explicit values. Retry timestamps are unchanged.
 
 ### 4.4 Auth model: a per-machine shared secret, one token reused in both directions
 
@@ -510,8 +539,8 @@ Example of the new fields in the `machines` + `deploy` sections of `agenda-v2.ya
 
 ```yaml
 deploy:
-  max_output_bytes: 65536
-  default_timeout: "5m"
+  max_output_bytes: 4096
+  default_timeout: "20m"
   agent_poll_interval: "2s"    # interval at which agentRunner polls the node's task status
 
 machines:

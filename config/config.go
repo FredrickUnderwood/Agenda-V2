@@ -129,6 +129,11 @@ type GitConfig struct {
 	SecretValues func() []string `yaml:"-"`
 }
 
+const (
+	DefaultDeployTimeout        = 20 * time.Minute
+	DefaultDeployMaxOutputBytes = 4 * 1024
+)
+
 type DeployConfig struct {
 	MaxOutputBytes    int      `yaml:"max_output_bytes"`
 	DefaultTimeout    duration `yaml:"default_timeout"`
@@ -194,8 +199,8 @@ func defaults() *Config {
 		},
 		Machines: map[string]MachineConfig{},
 		Deploy: DeployConfig{
-			MaxOutputBytes:    65536,
-			DefaultTimeout:    duration{5 * time.Minute},
+			MaxOutputBytes:    DefaultDeployMaxOutputBytes,
+			DefaultTimeout:    duration{DefaultDeployTimeout},
 			AgentPollInterval: duration{2 * time.Second},
 		},
 		Gateway: GatewayConfig{

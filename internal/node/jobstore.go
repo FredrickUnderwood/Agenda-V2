@@ -1,12 +1,13 @@
 package node
 
 import (
-	"bytes"
 	"context"
+	"io"
 	"sync"
 	"time"
 
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/outputtail"
 )
 
 // Job execution states reported to the control plane.
@@ -19,22 +20,17 @@ const (
 type job struct {
 	mu     sync.Mutex
 	status string
-	buf    bytes.Buffer // written only by the run goroutine; read only once terminal
+	buf    *outputtail.Buffer
 	err    string
 	doneAt time.Time
 	cancel context.CancelFunc
 }
 
-// Output is populated only when the job is terminal (success/failed); while
-// running it is empty. Streaming partial output during a run is a deferred
-// enhancement — returning it only at the end keeps the job buffer free of
-// concurrent read/write (the run goroutine is the sole writer and has finished
-// before any terminal read).
-//
 // JobStore is agenda-node's in-memory task table. Jobs are not persisted — a
 // node restart drops them, and the control plane treats a 404 on a job it
 // dispatched as a lost task (step failure), the same outcome as a dropped SSH
 // session. A background sweeper GCs finished jobs after retention.
+// Output is a bounded tail available during execution as well as at completion.
 type JobStore struct {
 	mu             sync.Mutex
 	jobs           map[string]*job
@@ -64,20 +60,20 @@ func NewJobStore(maxOutputBytes int, retention time.Duration) *JobStore {
 // Dispatch is idempotent: dispatching an existing job_id returns without
 // starting a second command, so a retried POST never double-runs a deploy. run
 // receives a context cancelled by DELETE (orphan reclamation) or maxJobDuration.
-func (s *JobStore) Dispatch(id string, run func(ctx context.Context, buf *bytes.Buffer) error) {
+func (s *JobStore) Dispatch(id string, run func(ctx context.Context, buf io.Writer) error) {
 	s.mu.Lock()
 	if _, exists := s.jobs[id]; exists {
 		s.mu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.maxJobDuration)
-	j := &job{status: StatusRunning, cancel: cancel}
+	j := &job{status: StatusRunning, cancel: cancel, buf: outputtail.New(s.maxOutputBytes)}
 	s.jobs[id] = j
 	s.mu.Unlock()
 
 	go func() {
 		defer cancel()
-		err := run(ctx, &j.buf)
+		err := run(ctx, j.buf)
 		j.mu.Lock()
 		j.doneAt = time.Now()
 		if err != nil {
@@ -89,8 +85,8 @@ func (s *JobStore) Dispatch(id string, run func(ctx context.Context, buf *bytes.
 	}()
 }
 
-// Get returns the job's current status; ok is false if unknown. Output is
-// included only when terminal (the run goroutine has finished writing buf).
+// Get returns the current status and a snapshot of the bounded output tail,
+// including for running jobs. Snapshots replace one another; they are not deltas.
 func (s *JobStore) Get(id string) (contract.NodeJobStatus, bool) {
 	s.mu.Lock()
 	j, ok := s.jobs[id]
@@ -100,10 +96,7 @@ func (s *JobStore) Get(id string) (contract.NodeJobStatus, bool) {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	st := contract.NodeJobStatus{Status: j.status, Error: j.err}
-	if j.status != StatusRunning {
-		st.Output = capTail(j.buf.String(), s.maxOutputBytes)
-	}
+	st := contract.NodeJobStatus{Status: j.status, Error: j.err, Output: j.buf.String()}
 	return st, true
 }
 
@@ -157,13 +150,4 @@ func (s *JobStore) sweep() {
 			delete(s.jobs, id)
 		}
 	}
-}
-
-// capTail returns the last max bytes of s (the tail, where a failing command's
-// error typically is), prefixed with a truncation marker when it clips.
-func capTail(s string, max int) string {
-	if max <= 0 || len(s) <= max {
-		return s
-	}
-	return "...[truncated]...\n" + s[len(s)-max:]
 }

@@ -13,10 +13,12 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/filestore"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
 )
 
 const defaultPollInterval = 2 * time.Second
@@ -39,28 +41,47 @@ func newAgentRunner(machine *config.MachineConfig) *agentRunner {
 	}
 }
 
-func (a *agentRunner) RunCmd(ctx context.Context, dir, name string, args []string, buf *bytes.Buffer) error {
+func (a *agentRunner) RunCmd(ctx context.Context, dir, name string, args []string, buf io.Writer) error {
 	return a.run(ctx, contract.NodeJobRequest{Mode: contract.NodeJobModeCmd, Dir: dir, Name: name, Args: args}, buf)
 }
 
-func (a *agentRunner) RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf *bytes.Buffer) error {
+func (a *agentRunner) RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf io.Writer) error {
 	return a.run(ctx, contract.NodeJobRequest{Mode: contract.NodeJobModeCmd, Dir: dir, Env: env, Name: name, Args: args}, buf)
 }
 
-func (a *agentRunner) RunShell(ctx context.Context, dir, shellCmd string, buf *bytes.Buffer) error {
+func (a *agentRunner) RunShell(ctx context.Context, dir, shellCmd string, buf io.Writer) error {
 	return a.run(ctx, contract.NodeJobRequest{Mode: contract.NodeJobModeShell, Dir: dir, Shell: shellCmd}, buf)
 }
 
-func (a *agentRunner) run(ctx context.Context, req contract.NodeJobRequest, buf *bytes.Buffer) error {
+func (a *agentRunner) run(ctx context.Context, req contract.NodeJobRequest, buf io.Writer) (runErr error) {
 	req.JobID = uuid.NewString()
 	if err := a.postJSON(ctx, "/v1/jobs", req); err != nil {
 		return err
 	}
-	// Best-effort reclaim: whether we finish or the caller's ctx expires, ask the
-	// node to drop the job so a command nobody is waiting on doesn't linger. Use
-	// a detached ctx so cancellation itself doesn't abort the cleanup call.
+	// Keep the latest snapshot in memory, replacing it on each poll. Write it
+	// once on return so polling neither duplicates output nor adds DB writes.
+	var lastOutput string
 	defer func() {
-		_ = a.deleteJob(context.WithoutCancel(ctx), req.JobID)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, context.Canceled) {
+			// Fetch before DELETE removes the node's buffer, even if the deploy
+			// expired before the first poll. A failed fetch keeps the last tail.
+			snapshotCtx, snapshotCancel := context.WithTimeout(cleanupCtx, 2*time.Second)
+			st, _, err := a.getJob(snapshotCtx, req.JobID)
+			snapshotCancel()
+			if err == nil && st.Output != "" {
+				lastOutput = st.Output
+			}
+			logger.L().Info("agent job interrupted",
+				zap.String("job_id", req.JobID), zap.String("command", req.Name),
+				zap.Int("output_bytes", len(lastOutput)), zap.Error(runErr),
+				zap.Bool("final_output_fetched", err == nil))
+		}
+		_, _ = io.WriteString(buf, lastOutput)
+		// Reclaim the job using a bounded detached context so an unreachable
+		// node cannot hold up failure persistence indefinitely.
+		_ = a.deleteJob(cleanupCtx, req.JobID)
 	}()
 
 	ticker := time.NewTicker(a.pollInterval())
@@ -80,14 +101,15 @@ func (a *agentRunner) run(ctx context.Context, req contract.NodeJobRequest, buf 
 				}
 				continue
 			}
+			if st.Output != "" {
+				lastOutput = st.Output
+			}
 			switch st.Status {
 			case "", "running":
 				// keep polling
 			case "success":
-				buf.WriteString(st.Output)
 				return nil
 			case "failed":
-				buf.WriteString(st.Output)
 				if st.Error != "" {
 					return errors.New(st.Error)
 				}

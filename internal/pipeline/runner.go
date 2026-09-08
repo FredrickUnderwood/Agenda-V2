@@ -1,9 +1,9 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"errors"
+	"io"
 	"time"
 
 	"go.uber.org/zap"
@@ -11,10 +11,16 @@ import (
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
 	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"github.com/FredrickUnderwood/agenda-v2/internal/outputtail"
 	"github.com/FredrickUnderwood/agenda-v2/internal/service"
 )
 
-const defaultMaxOutput = 65536
+const (
+	maxOutputLines = 50
+	// Keep stored output/error fields small even when older configs still ask
+	// for 16/64 KiB. The marker and final failure reason share this byte budget.
+	maxStoredOutputBytes = 4 * 1024
+)
 
 // Runner executes a pipeline and persists per-step state. It is stateless
 // across runs; each Run call operates on a single DeployLog.
@@ -28,8 +34,9 @@ type Runner struct {
 func NewRunner(cfg *config.Config, logSvc *service.DeployLogService, stepSvc *service.PipelineStepService) *Runner {
 	maxBytes := cfg.Deploy.MaxOutputBytes
 	if maxBytes <= 0 {
-		maxBytes = defaultMaxOutput
+		maxBytes = config.DefaultDeployMaxOutputBytes
 	}
+	maxBytes = min(maxBytes, maxStoredOutputBytes)
 	return &Runner{cfg: cfg, logSvc: logSvc, stepSvc: stepSvc, maxOutputBytes: maxBytes}
 }
 
@@ -111,17 +118,17 @@ func (r *Runner) runOne(ctx context.Context, bp Blueprint, row *domain.PipelineS
 	row.ErrorMsg = ""
 	_ = r.stepSvc.Update(ctx, row)
 
-	var buf bytes.Buffer
+	buf := outputtail.New(r.maxOutputBytes)
 	rc := &RunContext{
 		Log: log, App: target.App, Branch: target.Branch, CommitSHA: target.CommitSHA,
-		Cfg: r.cfg, Output: &buf, LocalPath: localPath,
+		Cfg: r.cfg, Output: buf, LocalPath: localPath,
 	}
 	execErr := bp.Exec.Execute(ctx, rc)
 
 	finish := time.Now().UTC()
 	row.FinishedAt = &finish
 	row.DurationMs = finish.Sub(start).Milliseconds()
-	row.Output = capOutput(&buf, r.maxOutputBytes)
+	row.Output = outputtail.Tail(buf.String(), r.maxOutputBytes, maxOutputLines)
 
 	// Use a detached context for persistence so a cancelled execution context
 	// (e.g. timeout) does not prevent the step status from being written to DB.
@@ -130,9 +137,15 @@ func (r *Runner) runOne(ctx context.Context, bp Blueprint, row *domain.PipelineS
 
 	if execErr != nil {
 		row.Status = domain.StepStatusFailed
-		row.ErrorMsg = execErr.Error()
+		row.ErrorMsg = outputtail.Tail(execErr.Error(), r.maxOutputBytes, maxOutputLines)
 		if row.Output == "" {
-			row.Output = execErr.Error()
+			row.Output = row.ErrorMsg
+		} else {
+			// The release drawer displays output in preference to error_msg.
+			// Keep the reason visible alongside the diagnostic tail, within
+			// the same storage budget.
+			_, _ = io.WriteString(buf, "\n[error] "+row.ErrorMsg+"\n")
+			row.Output = outputtail.Tail(buf.String(), r.maxOutputBytes, maxOutputLines)
 		}
 		_ = r.stepSvc.Update(saveCtx, row)
 		logger.L().Info("pipeline: step failed",
@@ -169,20 +182,11 @@ func (r *Runner) fail(ctx context.Context, log *domain.DeployLog, row *domain.Pi
 		log.Output = row.Output
 		log.ErrorMsg = row.ErrorMsg
 	} else {
-		log.Output = cause.Error()
-		log.ErrorMsg = cause.Error()
+		log.Output = outputtail.Tail(cause.Error(), r.maxOutputBytes, maxOutputLines)
+		log.ErrorMsg = log.Output
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	_ = r.logSvc.Finish(finishCtx, log)
 	logger.L().Info("pipeline: run failed", zap.Int64("id", log.ID), zap.Error(cause))
-}
-
-// capOutput truncates the buffer to the last maxBytes bytes.
-func capOutput(buf *bytes.Buffer, maxBytes int) string {
-	b := buf.Bytes()
-	if len(b) > maxBytes {
-		b = b[len(b)-maxBytes:]
-	}
-	return string(b)
 }

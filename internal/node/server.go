@@ -1,10 +1,10 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -197,17 +197,17 @@ func (s *Server) dispatchJob(c *gin.Context) {
 
 // runnerFor builds the closure the JobStore executes, translating the wire
 // request into the appropriate runner call. Returns nil for an unknown mode.
-func (s *Server) runnerFor(req contract.NodeJobRequest) func(ctx context.Context, buf *bytes.Buffer) error {
+func (s *Server) runnerFor(req contract.NodeJobRequest) func(ctx context.Context, buf io.Writer) error {
 	switch req.Mode {
 	case contract.NodeJobModeCmd:
-		return func(ctx context.Context, buf *bytes.Buffer) error {
+		return func(ctx context.Context, buf io.Writer) error {
 			if len(req.Env) > 0 {
 				return s.local.RunCmdEnv(ctx, req.Dir, req.Env, req.Name, req.Args, buf)
 			}
 			return s.local.RunCmd(ctx, req.Dir, req.Name, req.Args, buf)
 		}
 	case contract.NodeJobModeShell:
-		return func(ctx context.Context, buf *bytes.Buffer) error {
+		return func(ctx context.Context, buf io.Writer) error {
 			return s.local.RunShell(ctx, req.Dir, req.Shell, buf)
 		}
 	default:
