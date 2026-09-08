@@ -121,7 +121,7 @@ git:
 
 deploy:
   # Per-step log tail, capped in bytes (including the truncation marker).
-  max_output_bytes: 16384
+  max_output_bytes: 4096
   default_timeout: "20m"
   agent_poll_interval: "2s"
 

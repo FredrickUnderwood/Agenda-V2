@@ -131,6 +131,61 @@ func TestJobStoreRunningOutputSnapshot(t *testing.T) {
 	}
 }
 
+func TestJobStoreReclaimsExpiredOutputWithoutRemovingActiveJobs(t *testing.T) {
+	s := NewJobStore(64, time.Hour)
+	for _, id := range []string{"expired", "recent"} {
+		s.Dispatch(id, func(ctx context.Context, out io.Writer) error {
+			_, err := io.WriteString(out, strings.Repeat("output\n", 1000))
+			return err
+		})
+		waitFor(t, func() bool {
+			st, _ := s.Get(id)
+			return st.Status == StatusSuccess
+		})
+	}
+	s.Dispatch("running", func(ctx context.Context, out io.Writer) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	defer s.Delete("running")
+
+	// A completed job left behind by a failed control-plane DELETE must
+	// eventually release its log buffer, while active/recent jobs stay readable.
+	s.mu.Lock()
+	expired := s.jobs["expired"]
+	s.mu.Unlock()
+	expired.mu.Lock()
+	expired.doneAt = time.Now().Add(-2 * time.Hour)
+	expired.mu.Unlock()
+	s.sweep()
+	if _, ok := s.Get("expired"); ok {
+		t.Fatal("expired job still retains its output in the task table")
+	}
+	for _, id := range []string{"recent", "running"} {
+		if _, ok := s.Get(id); !ok {
+			t.Fatalf("GC removed %s job", id)
+		}
+	}
+}
+
+func TestJobStoreOrphanedJobHasExecutionDeadline(t *testing.T) {
+	s := NewJobStore(64, time.Hour)
+	s.maxJobDuration = 20 * time.Millisecond
+	s.Dispatch("orphan", func(ctx context.Context, out io.Writer) error {
+		io.WriteString(out, "last progress\n")
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	waitFor(t, func() bool {
+		st, _ := s.Get("orphan")
+		return st.Status == StatusFailed
+	})
+	st, _ := s.Get("orphan")
+	if st.Error != context.DeadlineExceeded.Error() || st.Output != "last progress\n" {
+		t.Fatalf("orphaned job = %+v", st)
+	}
+}
+
 func TestSplitInstancePrefix(t *testing.T) {
 	cases := []struct {
 		path           string

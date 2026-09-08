@@ -27,9 +27,9 @@ git:
     # github.com: "ghp_xxx"
 
 deploy:
-  # Per-step output: last 200 log lines, at most this many bytes including the
-  # truncation marker. Values above 65535 are clamped to fit MySQL TEXT.
-  max_output_bytes: 16384
+  # Per-step output: last 50 log lines, at most this many bytes including the
+  # truncation marker. Values above 4096 are clamped to bound MySQL storage.
+  max_output_bytes: 4096
   default_timeout: "20m"
   agent_poll_interval: "2s"   # how often the control plane polls an agenda-node for job status
 

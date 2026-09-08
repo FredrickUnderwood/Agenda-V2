@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	maxOutputLines = 200
-	// Both output columns are MySQL TEXT (65,535 bytes, including the marker).
-	maxStoredOutputBytes = 65535
+	maxOutputLines = 50
+	// Keep stored output/error fields small even when older configs still ask
+	// for 16/64 KiB. The marker and final failure reason share this byte budget.
+	maxStoredOutputBytes = 4 * 1024
 )
 
 // Runner executes a pipeline and persists per-step state. It is stateless

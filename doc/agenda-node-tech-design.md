@@ -331,10 +331,19 @@ does not create MySQL writes. On timeout/cancellation it attempts one final GET
 (up to 2 seconds) before deleting the job, falling back to its last snapshot if
 the node is unavailable. Snapshot recovery and deletion share a 5-second budget.
 
-Each persisted step output contains the last 200 log lines and at most
-`deploy.max_output_bytes` bytes (default 16 KiB). The truncation marker counts
+The node retains at most `max_output_bytes` bytes of output per job (default
+64 KiB), and the control plane replaces its previous polling snapshot instead
+of appending snapshots. Normal completion and timeout both attempt to delete the
+node job. If deletion fails, a job has a 30-minute execution deadline; after it
+finishes, GC removes it once its retention expires (default 1 hour, checked every
+30 minutes). These are per-job bounds and expiry rules, not a process-wide memory
+limit: the task table has no maximum job count, and total memory scales with the
+number of active or retained jobs, plus request/serialization allocations.
+
+Each persisted step output contains the last 50 log lines and at most
+`deploy.max_output_bytes` bytes (default 4 KiB). The truncation marker counts
 toward the byte limit, UTF-8 remains valid, and configured limits are clamped to
-65,535 bytes to fit the existing MySQL TEXT columns. Failed runs also copy this
+4,096 bytes even if an older YAML still requests 16/64 KiB. Failed runs also copy this
 bounded tail to the deployment summary. The failure reason is appended within
 the same budget so the UI can show both progress and the reason for stopping.
 No new log-history rows are created.
@@ -530,7 +539,7 @@ Example of the new fields in the `machines` + `deploy` sections of `agenda-v2.ya
 
 ```yaml
 deploy:
-  max_output_bytes: 16384
+  max_output_bytes: 4096
   default_timeout: "20m"
   agent_poll_interval: "2s"    # interval at which agentRunner polls the node's task status
 

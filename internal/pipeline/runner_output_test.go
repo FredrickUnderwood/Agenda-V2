@@ -82,7 +82,7 @@ func TestPipelinePersistsBoundedAgentOutputAfterTimeout(t *testing.T) {
 	}
 }
 
-func TestPipelineLimitsStoredLinesAndMySQLTextBytes(t *testing.T) {
+func TestPipelineLimitsStoredLinesAndBytes(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		maxBytes int
@@ -90,6 +90,7 @@ func TestPipelineLimitsStoredLinesAndMySQLTextBytes(t *testing.T) {
 		wantTail string
 	}{
 		{"lines", 0, strings.Repeat("old\n", 500) + "last\n", "last\n"},
+		{"previous 16 KiB setting", 16384, strings.Repeat("old output", 2000) + "last\n", "last\n"},
 		{"oversized setting", 1 << 20, strings.Repeat("中文", 20000) + "last\n", "last\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,7 +108,7 @@ func TestPipelineLimitsStoredLinesAndMySQLTextBytes(t *testing.T) {
 			if saved.Status != domain.DeployStatusSuccess || !strings.HasSuffix(got, tc.wantTail) || !strings.HasPrefix(got, outputtail.Marker) || !utf8.ValidString(got) {
 				t.Fatalf("status=%s output=%.100q", saved.Status, got)
 			}
-			if len(got) > r.maxOutputBytes || len(got) > 65535 || strings.Count(strings.TrimPrefix(got, outputtail.Marker), "\n") > 200 {
+			if len(got) > r.maxOutputBytes || len(got) > 4096 || strings.Count(strings.TrimPrefix(got, outputtail.Marker), "\n") > 50 {
 				t.Fatalf("persisted output exceeds limit: %d bytes", len(got))
 			}
 		})

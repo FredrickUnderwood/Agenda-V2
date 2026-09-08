@@ -131,7 +131,7 @@ type GitConfig struct {
 
 const (
 	DefaultDeployTimeout        = 20 * time.Minute
-	DefaultDeployMaxOutputBytes = 16 * 1024
+	DefaultDeployMaxOutputBytes = 4 * 1024
 )
 
 type DeployConfig struct {
