@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"io"
 	"path/filepath"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
@@ -21,7 +22,7 @@ func (s *ShellStep) Execute(ctx context.Context, rc *RunContext) error {
 	cwd := filepath.Join(rc.LocalPath, s.WorkDir)
 	r := runner.New(s.Machine)
 	for _, cmd := range s.Commands {
-		_, _ = rc.Output.WriteString("$ " + cmd + "\n")
+		_, _ = io.WriteString(rc.Output, "$ "+cmd+"\n")
 		if err := r.RunShell(ctx, cwd, cmd, rc.Output); err != nil {
 			return err
 		}

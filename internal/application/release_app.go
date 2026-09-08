@@ -556,7 +556,7 @@ func (a *ReleaseApplication) prepareRun(ctx context.Context, rel *domain.Applica
 func (a *ReleaseApplication) runAsync(releaseID int64, target *domain.DeployTarget, log *domain.DeployLog, blueprints []pipeline.Blueprint, localPath string) {
 	timeout := a.cfg.Deploy.DefaultTimeout.Duration
 	if timeout == 0 {
-		timeout = 5 * time.Minute
+		timeout = config.DefaultDeployTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -658,7 +658,7 @@ func (a *ReleaseApplication) alertDeployFailed(ctx context.Context, target *doma
 func (a *ReleaseApplication) lockTTL() time.Duration {
 	ttl := a.cfg.Deploy.DefaultTimeout.Duration
 	if ttl == 0 {
-		ttl = 5 * time.Minute
+		ttl = config.DefaultDeployTimeout
 	}
 	return ttl + 30*time.Second
 }

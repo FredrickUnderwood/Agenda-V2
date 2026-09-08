@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"io"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/git"
@@ -30,6 +31,6 @@ func (s *GitPullStep) Execute(ctx context.Context, rc *RunContext) error {
 		return err
 	}
 	rc.Log.TriggerSHA = sha
-	_, _ = rc.Output.WriteString("pulled branch " + rc.Branch + " (commit " + sha + ") into " + rc.LocalPath + "\n")
+	_, _ = io.WriteString(rc.Output, "pulled branch "+rc.Branch+" (commit "+sha+") into "+rc.LocalPath+"\n")
 	return nil
 }

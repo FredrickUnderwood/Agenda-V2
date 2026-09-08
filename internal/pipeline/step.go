@@ -4,8 +4,8 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
+	"io"
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/domain"
@@ -36,7 +36,7 @@ type RunContext struct {
 	Branch    string
 	CommitSHA string
 	Cfg       *config.Config
-	Output    *bytes.Buffer
+	Output    io.Writer
 
 	// LocalPath is the on-machine clone directory for this run. Resolved
 	// once by Builder.Build from (cfg.WorkspaceRoot, app.RepoURL, branch) and

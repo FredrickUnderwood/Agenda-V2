@@ -120,8 +120,9 @@ git:
   tokens: {}
 
 deploy:
-  max_output_bytes: 65536
-  default_timeout: "5m"
+  # Per-step log tail, capped in bytes (including the truncation marker).
+  max_output_bytes: 16384
+  default_timeout: "20m"
   agent_poll_interval: "2s"
 
 gateway:

@@ -3,7 +3,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -40,12 +39,12 @@ func hardenProcGroup(cmd *exec.Cmd) {
 // Runner executes commands in a given working directory.
 type Runner interface {
 	// RunCmd runs a binary with explicit args, writing stdout+stderr to buf.
-	RunCmd(ctx context.Context, dir, name string, args []string, buf *bytes.Buffer) error
+	RunCmd(ctx context.Context, dir, name string, args []string, buf io.Writer) error
 	// RunCmdEnv is RunCmd plus extra "KEY=VALUE" env vars (local: appended to
 	// process env; ssh: prefixed to the remote command).
-	RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf *bytes.Buffer) error
+	RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf io.Writer) error
 	// RunShell runs a raw shell string via sh -c, writing stdout+stderr to buf.
-	RunShell(ctx context.Context, dir, shellCmd string, buf *bytes.Buffer) error
+	RunShell(ctx context.Context, dir, shellCmd string, buf io.Writer) error
 
 	// PutFile streams src to an absolute path on the runner's machine, creating
 	// parent directories as needed, and reports what ended up on disk. mode is
@@ -79,11 +78,11 @@ func New(machine *config.MachineConfig) Runner {
 
 type localRunner struct{}
 
-func (l *localRunner) RunCmd(ctx context.Context, dir, name string, args []string, buf *bytes.Buffer) error {
+func (l *localRunner) RunCmd(ctx context.Context, dir, name string, args []string, buf io.Writer) error {
 	return l.RunCmdEnv(ctx, dir, nil, name, args, buf)
 }
 
-func (l *localRunner) RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf *bytes.Buffer) error {
+func (l *localRunner) RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = buf
@@ -95,7 +94,7 @@ func (l *localRunner) RunCmdEnv(ctx context.Context, dir string, env []string, n
 	return cmd.Run()
 }
 
-func (l *localRunner) RunShell(ctx context.Context, dir, shellCmd string, buf *bytes.Buffer) error {
+func (l *localRunner) RunShell(ctx context.Context, dir, shellCmd string, buf io.Writer) error {
 	return l.RunCmd(ctx, dir, "sh", []string{"-c", shellCmd}, buf)
 }
 
@@ -105,11 +104,11 @@ type sshRunner struct {
 	machine *config.MachineConfig
 }
 
-func (s *sshRunner) RunCmd(ctx context.Context, dir, name string, args []string, buf *bytes.Buffer) error {
+func (s *sshRunner) RunCmd(ctx context.Context, dir, name string, args []string, buf io.Writer) error {
 	return s.RunCmdEnv(ctx, dir, nil, name, args, buf)
 }
 
-func (s *sshRunner) RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf *bytes.Buffer) error {
+func (s *sshRunner) RunCmdEnv(ctx context.Context, dir string, env []string, name string, args []string, buf io.Writer) error {
 	parts := make([]string, 0, len(env)+len(args)+1)
 	for _, e := range env {
 		eq := strings.IndexByte(e, '=')
@@ -129,7 +128,7 @@ func (s *sshRunner) RunCmdEnv(ctx context.Context, dir string, env []string, nam
 	return s.runRemote(ctx, remote, buf)
 }
 
-func (s *sshRunner) RunShell(ctx context.Context, dir, shellCmd string, buf *bytes.Buffer) error {
+func (s *sshRunner) RunShell(ctx context.Context, dir, shellCmd string, buf io.Writer) error {
 	remote := shellCmd
 	if dir != "" {
 		remote = "cd " + shellQuote(dir) + " && " + shellCmd
@@ -137,14 +136,14 @@ func (s *sshRunner) RunShell(ctx context.Context, dir, shellCmd string, buf *byt
 	return s.runRemote(ctx, remote, buf)
 }
 
-func (s *sshRunner) runRemote(ctx context.Context, remoteCmd string, buf *bytes.Buffer) error {
+func (s *sshRunner) runRemote(ctx context.Context, remoteCmd string, buf io.Writer) error {
 	return s.runRemoteStdin(ctx, remoteCmd, nil, buf)
 }
 
 // runRemoteStdin is runRemote with an optional stdin stream, which is how
 // PutFile hands the file's bytes to the remote `cat` without ever putting them
 // in the command line (where they would hit the kernel's argv size limit).
-func (s *sshRunner) runRemoteStdin(ctx context.Context, remoteCmd string, stdin io.Reader, buf *bytes.Buffer) error {
+func (s *sshRunner) runRemoteStdin(ctx context.Context, remoteCmd string, stdin io.Reader, buf io.Writer) error {
 	sshArgs := s.sshArgs()
 	sshArgs = append(sshArgs, remoteCmd)
 

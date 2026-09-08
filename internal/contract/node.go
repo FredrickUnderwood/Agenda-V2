@@ -21,8 +21,9 @@ type NodeJobRequest struct {
 	Shell string   `json:"shell,omitempty"`
 }
 
-// NodeJobStatus is the response of GET /v1/jobs/:job_id. Output is populated
-// when the job is terminal (success/failed).
+// NodeJobStatus is the response of GET /v1/jobs/:job_id. Output is a bounded
+// tail snapshot, including while running; successive snapshots are not deltas.
+// Older nodes only populate Output on success/failed.
 type NodeJobStatus struct {
 	Status   string `json:"status"` // running | success | failed
 	ExitCode int    `json:"exit_code"`

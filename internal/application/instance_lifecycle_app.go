@@ -269,7 +269,7 @@ func (a *InstanceLifecycleApplication) prepareTeardownLog(ctx context.Context, t
 func (a *InstanceLifecycleApplication) runTeardown(target *domain.DeployTarget, log *domain.DeployLog, blueprints []pipeline.Blueprint, localPath string) {
 	timeout := a.cfg.Deploy.DefaultTimeout.Duration
 	if timeout == 0 {
-		timeout = 5 * time.Minute
+		timeout = config.DefaultDeployTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -315,7 +315,7 @@ func (a *InstanceLifecycleApplication) alertTeardownFailed(ctx context.Context, 
 func (a *InstanceLifecycleApplication) lockTTL() time.Duration {
 	ttl := a.cfg.Deploy.DefaultTimeout.Duration
 	if ttl == 0 {
-		ttl = 5 * time.Minute
+		ttl = config.DefaultDeployTimeout
 	}
 	return ttl + 30*time.Second
 }
