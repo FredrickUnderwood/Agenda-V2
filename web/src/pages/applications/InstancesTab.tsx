@@ -82,7 +82,7 @@ export function InstancesTab({ appId }: { appId: number }) {
     mutationFn: (targetId: number) => api.decommissionInstance(appId, targetId),
     onSuccess: () => {
       message.success('Instance is being decommissioned — traffic drained, containers tearing down.')
-      queryClient.invalidateQueries({ queryKey: ['applications', appId, 'instances'] })
+      queryClient.invalidateQueries({ queryKey: ['applications', appId] })
     },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })

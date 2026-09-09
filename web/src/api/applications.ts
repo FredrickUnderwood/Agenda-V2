@@ -3,6 +3,7 @@ import type {
   Application,
   ApplicationEnvironments,
   ApplicationEnvTarget,
+  ApplicationGatewayRoute,
   ApplicationInstanceHealth,
   CreateApplicationRequest,
   DeployLog,
@@ -43,6 +44,18 @@ export function getInstanceHealth(appId: number, targetId: number) {
   return apiClient
     .get<ApplicationInstanceHealth | { status: 'unknown' }>(`/applications/${appId}/instances/${targetId}/health`)
     .then((r) => r.data)
+}
+
+export function listApplicationRoutes(appId: number) {
+  return apiClient.get<ListResponse<ApplicationGatewayRoute>>(`/applications/${appId}/routes`).then((r) => r.data)
+}
+
+export function disableApplicationRoute(appId: number, routeId: number) {
+  return apiClient.post<void>(`/applications/${appId}/routes/${routeId}/disable`).then((r) => r.data)
+}
+
+export function deleteApplicationRoute(appId: number, routeId: number) {
+  return apiClient.delete<void>(`/applications/${appId}/routes/${routeId}`).then((r) => r.data)
 }
 
 export function checkInstanceHealth(appId: number, targetId: number) {

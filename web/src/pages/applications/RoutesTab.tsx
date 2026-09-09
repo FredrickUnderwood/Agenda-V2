@@ -13,6 +13,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import * as api from '@/api/applications'
@@ -28,7 +29,7 @@ import type {
 import { StatusPill } from '@/components/StatusPill'
 import { RefreshButton } from '@/components/RefreshButton'
 import { errorMessage } from '@/utils/errorMessage'
-import { buildTargetsPayload, routesForEnv, routeToRequest } from './targetPayload'
+import { buildTargetsPayload, routeToRequest } from './targetPayload'
 
 const DEFAULT_INSTANCE_HEADER = 'X-Agenda-Instance'
 
@@ -51,11 +52,6 @@ interface RouteFormValues {
   websocket_allowed_origins?: string
 }
 
-// A route rendered in the table, tagged with its env for grouping.
-interface RouteRow extends ApplicationGatewayRoute {
-  _rowKey: string
-}
-
 export function RoutesTab({ appId }: { appId: number }) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
@@ -67,11 +63,16 @@ export function RoutesTab({ appId }: { appId: number }) {
   const formEnv = Form.useWatch('env', form)
   const upgradeMode = Form.useWatch('upgrade_mode', form)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading: instancesLoading } = useQuery({
     queryKey: ['applications', appId, 'instances'],
     queryFn: () => api.listApplicationInstances(appId),
   })
   const targets = useMemo(() => data?.data ?? [], [data])
+  const { data: routeData, isLoading: routesLoading, error: routesError } = useQuery({
+    queryKey: ['applications', appId, 'routes'],
+    queryFn: () => api.listApplicationRoutes(appId),
+  })
+  const rows = routeData?.data ?? []
 
   // Envs that have at least one instance — a route needs a backend instance to
   // point at, and the write path only persists routes attached to a target.
@@ -81,33 +82,44 @@ export function RoutesTab({ appId }: { appId: number }) {
     return [...set]
   }, [targets])
 
-  // Deduped routes across all envs (routes are echoed onto every target of an
-  // env, so take each env's first target as authoritative).
-  const rows = useMemo<RouteRow[]>(() => {
-    const out: RouteRow[] = []
-    const seen = new Set<Environment>()
-    for (const t of targets) {
-      if (seen.has(t.env)) continue
-      seen.add(t.env)
-      for (const r of t.gateway_routes ?? []) {
-        out.push({ ...r, _rowKey: `${t.env}:${r.route_key}` })
-      }
-    }
-    return out
-  }, [targets])
-
   const saveMutation = useMutation({
-    mutationFn: ({ env, routes }: { env: Environment; routes: ApplicationGatewayRouteRequest[] }) =>
-      api.updateApplication(appId, { targets: buildTargetsPayload(targets, [], { env, routes }) }),
-    onSuccess: () => {
+    mutationFn: async ({ env, routes }: { env: Environment; routes: ApplicationGatewayRouteRequest[] }) => {
+      if (editing?.enabled && routes.some((r) => r.id === editing.id && !r.enabled)) {
+        await api.disableApplicationRoute(appId, editing.id)
+      }
+      return api.updateApplication(appId, { targets: buildTargetsPayload(targets, [], { env, routes }) })
+    },
+    onSuccess: async () => {
       message.success('Routes updated.')
-      queryClient.invalidateQueries({ queryKey: ['applications', appId] })
+      await queryClient.invalidateQueries({ queryKey: ['applications', appId] })
       setModalOpen(false)
       setEditing(null)
       form.resetFields()
     },
+    onError: (err: unknown) => {
+      message.error(errorMessage(err))
+      queryClient.invalidateQueries({ queryKey: ['applications', appId] })
+    },
+  })
+
+  const disableMutation = useMutation({
+    mutationFn: (route: ApplicationGatewayRoute) => api.disableApplicationRoute(appId, route.id),
+    onSuccess: async () => {
+      message.success('Route disabled. Its configuration and host/path reservation are kept.')
+      await queryClient.invalidateQueries({ queryKey: ['applications', appId] })
+    },
     onError: (err: unknown) => message.error(errorMessage(err)),
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: (route: ApplicationGatewayRoute) => api.deleteApplicationRoute(appId, route.id),
+    onSuccess: async () => {
+      message.success('Route deleted. Its host/path can now be reused.')
+      await queryClient.invalidateQueries({ queryKey: ['applications', appId] })
+    },
+    onError: (err: unknown) => message.error(errorMessage(err)),
+  })
+  const changing = saveMutation.isPending || disableMutation.isPending || deleteMutation.isPending
 
   function openCreate() {
     setEditing(null)
@@ -154,7 +166,7 @@ export function RoutesTab({ appId }: { appId: number }) {
   // replaces the right row); creating appends and lets the backend reject a
   // duplicate route_key within the env.
   function submit(values: RouteFormValues) {
-    const existing = routesForEnv(targets, values.env).map(routeToRequest)
+    const existing = rows.filter((r) => r.env === values.env).map(routeToRequest)
     const next: ApplicationGatewayRouteRequest = {
       id: editing?.id,
       route_key: values.route_key.trim(),
@@ -193,13 +205,6 @@ export function RoutesTab({ appId }: { appId: number }) {
     saveMutation.mutate({ env: values.env, routes })
   }
 
-  function removeRoute(route: ApplicationGatewayRoute) {
-    const routes = routesForEnv(targets, route.env)
-      .filter((r) => r.route_key !== route.route_key)
-      .map(routeToRequest)
-    saveMutation.mutate({ env: route.env, routes })
-  }
-
   const envInstances = (env: Environment | undefined) =>
     env ? targets.filter((t) => t.env === env) : []
 
@@ -207,19 +212,20 @@ export function RoutesTab({ appId }: { appId: number }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ color: 'var(--agenda-ink-500, #888)', fontSize: 13 }}>
-          Gateway routes map an inbound host/path to this app's instances. Routes are scoped per environment.
+          Routes are kept when instances go offline or are removed. Disable keeps the host/path reserved; Delete releases it.
         </span>
         <Space>
-          <RefreshButton queryKeys={[['applications', appId, 'instances']]} />
-          <Button icon={<PlusOutlined />} onClick={openCreate} disabled={envsWithInstances.length === 0}>
+          <RefreshButton queryKeys={[['applications', appId]]} />
+          <Button icon={<PlusOutlined />} onClick={openCreate} disabled={envsWithInstances.length === 0 || changing || routesLoading || !!routesError}>
             Add route
           </Button>
         </Space>
       </div>
 
-      <Table<RouteRow>
-        rowKey="_rowKey"
-        loading={isLoading}
+      {routesError && <div role="alert">Unable to load routes: {errorMessage(routesError)}</div>}
+      <Table<ApplicationGatewayRoute>
+        rowKey="id"
+        loading={instancesLoading || routesLoading}
         dataSource={rows}
         pagination={false}
         columns={[
@@ -261,11 +267,16 @@ export function RoutesTab({ appId }: { appId: number }) {
             key: 'actions',
             render: (_, r) => (
               <Space>
-                <Button size="small" onClick={() => openEdit(r)}>
-                  Edit
-                </Button>
-                <Popconfirm title="Delete this route?" onConfirm={() => removeRoute(r)}>
-                  <Button size="small" danger>
+                <Tooltip title={envsWithInstances.includes(r.env) ? undefined : 'Add an instance in this environment to edit or re-enable this route.'}>
+                  <Button size="small" disabled={changing || !envsWithInstances.includes(r.env)} onClick={() => openEdit(r)}>
+                    Edit
+                  </Button>
+                </Tooltip>
+                <Popconfirm title="Disable this route?" description="New requests stop matching this route. Its configuration and host/path reservation are kept." onConfirm={() => disableMutation.mutateAsync(r)}>
+                  <Button size="small" disabled={changing || !r.enabled}>Disable</Button>
+                </Popconfirm>
+                <Popconfirm title="Permanently delete this route?" description="This removes the route from the gateway and releases its host/path. This cannot be undone." okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => deleteMutation.mutateAsync(r)}>
+                  <Button size="small" danger disabled={changing}>
                     Delete
                   </Button>
                 </Popconfirm>
@@ -304,9 +315,9 @@ export function RoutesTab({ appId }: { appId: number }) {
             name="route_key"
             label="Route key"
             rules={[{ required: true, message: 'A stable identifier for this route.' }]}
-            extra="Unique per environment, e.g. api or web."
+            extra="Globally unique. To replace a route key, delete the old route and create a new one."
           >
-            <Input placeholder="api" />
+            <Input placeholder="api" disabled={!!editing} />
           </Form.Item>
           <Form.Item
             name="host"

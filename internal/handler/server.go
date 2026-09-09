@@ -38,6 +38,7 @@ type Server struct {
 	auth                 *auth.Manager
 	releaseApp           *application.ReleaseApplication
 	instanceLifecycleApp *application.InstanceLifecycleApplication
+	appRouteApp          *application.ApplicationRouteApplication
 	httpServer           *http.Server
 }
 
@@ -63,6 +64,7 @@ func NewServer(
 	authMgr *auth.Manager,
 	releaseApp *application.ReleaseApplication,
 	instanceLifecycleApp *application.InstanceLifecycleApplication,
+	appRouteApp *application.ApplicationRouteApplication,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
@@ -72,6 +74,7 @@ func NewServer(
 		dbInstanceSvc: dbInstanceSvc, dbQuerySvc: dbQuerySvc, settingSvc: settingSvc,
 		alertSvc: alertSvc, alertRuleSvc: alertRuleSvc, notificationSvc: notificationSvc, userSvc: userSvc, auth: authMgr, releaseApp: releaseApp,
 		instanceLifecycleApp: instanceLifecycleApp,
+		appRouteApp:          appRouteApp,
 	}
 	s.engine.Use(ginzap.Ginzap(logger.L(), time.RFC3339, true))
 	s.engine.Use(ginzap.RecoveryWithZap(logger.L(), true))
@@ -135,6 +138,9 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:appID", s.getApplication)
 		apps.PUT("/:appID", s.updateApplication)
 		apps.DELETE("/:appID", s.deleteApplication)
+		apps.GET("/:appID/routes", s.listApplicationRoutes)
+		apps.DELETE("/:appID/routes/:routeID", s.deleteApplicationRoute)
+		apps.POST("/:appID/routes/:routeID/disable", s.disableApplicationRoute)
 		apps.GET("/:appID/instances", s.listApplicationInstances)
 		apps.GET("/:appID/instances/:targetID/health", s.getApplicationInstanceHealth)
 		apps.POST("/:appID/instances/:targetID/health/check", s.checkApplicationInstanceHealth)

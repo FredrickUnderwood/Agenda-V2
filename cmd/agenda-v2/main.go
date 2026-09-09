@@ -138,6 +138,10 @@ func main() {
 	// Application
 	releaseApp := application.NewReleaseApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, envDeploymentSvc, alertSvc)
 	instanceLifecycleApp := application.NewInstanceLifecycleApplication(cfg, builder, runner, logSvc, stepSvc, appSvc, appReleaseSvc, lockSvc, appHealthSvc, alertSvc)
+	appRouteApp := application.NewApplicationRouteApplication(appSvc, nil, lockSvc)
+	if cfg.Gateway.Enabled {
+		appRouteApp = application.NewApplicationRouteApplication(appSvc, gatewayclient.NewClient(cfg.Gateway), lockSvc)
+	}
 
 	healthMonitor := application.NewHealthMonitor(appHealthSvc, 15*time.Second)
 	healthMonitor.Start()
@@ -176,7 +180,7 @@ func main() {
 	}
 
 	// Handler
-	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, machineFileSvc, logSvc, appLogSvc, appMetricsSvc, dbInstanceSvc, dbQuerySvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp)
+	srv := handler.NewServer(cfg, appSvc, appHealthSvc, appEnvironmentSvc, appReleaseSvc, envDeploymentSvc, machineSvc, machineFileSvc, logSvc, appLogSvc, appMetricsSvc, dbInstanceSvc, dbQuerySvc, settingSvc, alertSvc, alertRuleSvc, notificationSvc, userSvc, authMgr, releaseApp, instanceLifecycleApp, appRouteApp)
 
 	// pprof debug server (goroutine/heap profiling). Bound to loopback by
 	// default so it is reachable via `docker exec` but never public. Disable

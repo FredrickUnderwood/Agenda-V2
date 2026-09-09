@@ -79,6 +79,7 @@ type GatewayApplication struct {
 	wsTransport   http.RoundTripper
 
 	mu        sync.RWMutex
+	refreshMu sync.Mutex
 	snapshots []service.RouteSnapshot
 	counters  map[string]int
 
@@ -158,6 +159,10 @@ func (a *GatewayApplication) Stop() {
 }
 
 func (a *GatewayApplication) Refresh(ctx context.Context) error {
+	// Keep a ticker refresh loaded before a deletion from restoring its stale
+	// snapshot after the lifecycle endpoint has refreshed and acknowledged it.
+	a.refreshMu.Lock()
+	defer a.refreshMu.Unlock()
 	snapshots, err := a.routes.LoadSnapshots(ctx)
 	if err != nil {
 		return err

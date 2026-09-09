@@ -72,3 +72,35 @@ func (s *Server) rollbackRoute(c *gin.Context) {
 func routeKey(c *gin.Context) string {
 	return strings.TrimSpace(c.Param("routeKey"))
 }
+
+func (s *Server) deleteRoute(c *gin.Context) {
+	s.changeRoute(c, true)
+}
+
+func (s *Server) disableRoute(c *gin.Context) {
+	s.changeRoute(c, false)
+}
+
+func (s *Server) changeRoute(c *gin.Context, remove bool) {
+	var owner contract.RouteOwner
+	if err := c.ShouldBindJSON(&owner); err != nil {
+		writeError(c, domain.NewInvalidParamError("application_id and env are required"))
+		return
+	}
+	var err error
+	if remove {
+		err = s.routes.DeleteRoute(c.Request.Context(), routeKey(c), owner)
+	} else {
+		err = s.routes.DisableRoute(c.Request.Context(), routeKey(c), owner)
+	}
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if err := s.gateway.Refresh(c.Request.Context()); err != nil {
+		writeError(c, err)
+		return
+	}
+	logCaller(c, "route lifecycle change requested")
+	c.Status(http.StatusNoContent)
+}

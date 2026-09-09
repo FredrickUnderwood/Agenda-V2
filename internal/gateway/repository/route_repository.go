@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/FredrickUnderwood/agenda-v2/internal/gateway/domain"
 	alog "github.com/FredrickUnderwood/agenda-v2/sdk/go/log"
 	"github.com/bytedance/sonic"
@@ -17,6 +18,44 @@ type RouteRepository struct {
 
 func NewRouteRepository(db *gorm.DB) *RouteRepository {
 	return &RouteRepository{db: db}
+}
+
+func (r *RouteRepository) DeleteRoute(ctx context.Context, routeKey string, owner contract.RouteOwner) error {
+	return r.changeRoute(ctx, routeKey, owner, true)
+}
+
+func (r *RouteRepository) DisableRoute(ctx context.Context, routeKey string, owner contract.RouteOwner) error {
+	return r.changeRoute(ctx, routeKey, owner, false)
+}
+
+func (r *RouteRepository) changeRoute(ctx context.Context, routeKey string, owner contract.RouteOwner, remove bool) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var route domain.Route
+		if err := tx.Where("route_key = ?", routeKey).First(&route).Error; err != nil {
+			// A route that was never deployed, or an acknowledged retry, is done.
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if route.ApplicationID != owner.ApplicationID || route.Env != owner.Env {
+			return domain.NewInvalidParamError("route belongs to another application or environment")
+		}
+		if !remove {
+			return tx.Model(&route).Update("status", domain.RouteStatusDisabled).Error
+		}
+		if err := tx.Where("route_id = ?", route.ID).Delete(&domain.Backend{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("route_id = ?", route.ID).Delete(&domain.RouteHistory{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&route).Error
+	})
+	if err != nil {
+		alog.L().Error("change gateway route failed", zap.String("route_key", routeKey), zap.Int64("application_id", owner.ApplicationID), zap.String("env", owner.Env), zap.Bool("delete", remove), zap.Error(err))
+	}
+	return err
 }
 
 func (r *RouteRepository) LoadEnabledRoutes(ctx context.Context) ([]domain.Route, error) {

@@ -90,20 +90,22 @@ func (a *InstanceLifecycleApplication) Decommission(ctx context.Context, appID, 
 		return nil, err
 	}
 
-	// Resolve the instance's current running branch (best-effort) so the teardown
-	// can also clean up the branch-specific compose project/network. An unknown
-	// branch is fine — the label-based container removal is branch-independent.
-	branch := a.currentBranch(ctx, appID, target.Env, target.InstanceName)
-	// Mark stopped in-memory too, so the drain's sibling resolution excludes this
-	// instance defensively regardless of read-after-write visibility.
-	target.DesiredState = domain.RuntimeStateStopped
-	dt := &domain.DeployTarget{App: app, EnvTarget: target, Branch: branch}
-
 	lockKey := service.ReleaseLockKey(appID, string(target.Env), target.InstanceName)
 	token, err := a.lockSvc.AcquireKey(ctx, lockKey, a.lockTTL())
 	if err != nil {
 		return nil, err
 	}
+
+	// Read routes under the lock: otherwise a concurrent route deletion between
+	// loadTarget and AcquireKey could be undone by the drain's upsert.
+	app, target, err = a.loadTarget(ctx, appID, targetID)
+	if err != nil {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, err
+	}
+	branch := a.currentBranch(ctx, appID, target.Env, target.InstanceName)
+	target.DesiredState = domain.RuntimeStateStopped
+	dt := &domain.DeployTarget{App: app, EnvTarget: target, Branch: branch}
 
 	// Persist the intent before doing anything physical: durable even if the
 	// process dies mid-teardown, and it immediately stops health probing.

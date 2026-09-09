@@ -17,6 +17,45 @@ func NewApplicationGatewayRouteRepository(db *gorm.DB) *ApplicationGatewayRouteR
 	return &ApplicationGatewayRouteRepository{db: db}
 }
 
+func (r *ApplicationGatewayRouteRepository) GetByApplicationID(ctx context.Context, appID, routeID int64) (*domain.ApplicationGatewayRoute, error) {
+	var route domain.ApplicationGatewayRoute
+	if err := r.db.WithContext(ctx).Where("application_id = ? AND id = ?", appID, routeID).First(&route).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.L().Error("failed to get application gateway route", zap.Int64("application_id", appID), zap.Int64("route_id", routeID), zap.Error(err))
+		}
+		return nil, err
+	}
+	return &route, nil
+}
+
+func (r *ApplicationGatewayRouteRepository) Disable(ctx context.Context, appID, routeID int64) error {
+	if err := r.db.WithContext(ctx).Model(&domain.ApplicationGatewayRoute{}).
+		Where("application_id = ? AND id = ?", appID, routeID).Update("enabled", false).Error; err != nil {
+		logger.L().Error("failed to disable application gateway route", zap.Int64("application_id", appID), zap.Int64("route_id", routeID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// Delete removes both the route and its selected backends atomically. Disabled
+// routes retain their unique keys; only this explicit operation releases them.
+func (r *ApplicationGatewayRouteRepository) Delete(ctx context.Context, appID, routeID int64) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var route domain.ApplicationGatewayRoute
+		if err := tx.Where("application_id = ? AND id = ?", appID, routeID).First(&route).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("route_id = ?", route.ID).Delete(&domain.ApplicationGatewayRouteBackend{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&route).Error
+	})
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		logger.L().Error("failed to delete application gateway route", zap.Int64("application_id", appID), zap.Int64("route_id", routeID), zap.Error(err))
+	}
+	return err
+}
+
 func (r *ApplicationGatewayRouteRepository) ListByApplicationEnv(ctx context.Context, appID int64, env domain.Environment) ([]*domain.ApplicationGatewayRoute, error) {
 	var routes []*domain.ApplicationGatewayRoute
 	if err := r.db.WithContext(ctx).
@@ -161,6 +200,7 @@ func (r *ApplicationGatewayRouteRepository) SyncByApplicationEnv(ctx context.Con
 					zap.Int64("id", old.ID), zap.String("route_key", old.RouteKey), zap.Error(err))
 				return err
 			}
+			logger.L().Info("omitted application gateway route disabled", zap.Int64("application_id", appID), zap.String("env", string(env)), zap.Int64("route_id", old.ID), zap.String("route_key", old.RouteKey))
 		}
 		return nil
 	})

@@ -123,6 +123,17 @@ func TestBuildGatewayDrain_AllEnabledExcludesStoppedKeepsSurvivor(t *testing.T) 
 	if spec.Backends[0].InstanceName != "blue" {
 		t.Errorf("expected survivor 'blue' as the only backend, got %q", spec.Backends[0].InstanceName)
 	}
+
+	// Manually disabled configuration must not be re-enabled by decommissioning
+	// one instance just because another healthy instance survives.
+	target.EnvTarget.GatewayRoutes[0].Enabled = false
+	bp, err = b.buildGatewayDrain(context.Background(), target, dockerCfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bp.Exec.(*GatewayRouteSyncStep).Routes[0].Enabled {
+		t.Fatal("decommission re-enabled a disabled route")
+	}
 }
 
 // Gateway integration off → no drain step at all (Exec nil), so a self-hosted

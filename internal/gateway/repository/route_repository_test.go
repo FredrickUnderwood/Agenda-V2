@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
@@ -20,6 +21,49 @@ func newTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func TestRouteDisableReservesMatchDeleteReleasesIt(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewRouteRepository(db)
+	ctx := context.Background()
+	owner := contract.RouteOwner{ApplicationID: 11, Env: "test"}
+	route := domain.Route{ApplicationID: 11, Env: "test", RouteKey: "old-test", ServiceName: "web", Host: "47.109.43.173", PathPrefix: "/", CurrentReleaseID: "release-1", Status: domain.RouteStatusEnabled}
+	backends := []domain.Backend{{TargetKey: "default", URL: "http://node:8080", Weight: 1, Enabled: true, Healthy: true}}
+	stored, err := repo.UpsertRoute(ctx, route, backends, "test", "seed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DisableRoute(ctx, route.RouteKey, owner); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetRoute(ctx, route.RouteKey)
+	if err != nil || got.Status != domain.RouteStatusDisabled || len(got.Backends) != 1 {
+		t.Fatalf("disable must preserve route and backends: %+v, %v", got, err)
+	}
+	if err := repo.DeleteRoute(ctx, route.RouteKey, contract.RouteOwner{ApplicationID: 12, Env: "test"}); err == nil {
+		t.Fatal("foreign owner deleted the route")
+	}
+	replacement := route
+	replacement.RouteKey = "new-prod"
+	replacement.Env = "prod"
+	if _, err := repo.UpsertRoute(ctx, replacement, backends, "test", "conflict"); err == nil {
+		t.Fatal("disabled route lost its database reservation")
+	}
+	for range 2 {
+		if err := repo.DeleteRoute(ctx, route.RouteKey, owner); err != nil {
+			t.Fatalf("delete and retry must succeed: %v", err)
+		}
+	}
+	for _, model := range []any{&domain.Backend{}, &domain.RouteHistory{}} {
+		var count int64
+		if err := db.Model(model).Where("route_id = ?", stored.ID).Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("dependent %T rows survived: %d, %v", model, count, err)
+		}
+	}
+	if _, err := repo.UpsertRoute(ctx, replacement, backends, "test", "reuse"); err != nil {
+		t.Fatalf("deleted host/path cannot be reused: %v", err)
+	}
 }
 
 // TestUpsertRoutePersistsUnhealthyBackend is the regression guard for the

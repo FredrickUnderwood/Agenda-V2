@@ -92,6 +92,8 @@ func (s *Server) registerRoutes() {
 		routes.GET("", requirePerm(auth.PermRouteRead), s.listRoutes)
 		routes.GET("/:routeKey", requirePerm(auth.PermRouteRead), s.getRoute)
 		routes.PUT("/:routeKey", requirePerm(auth.PermRouteUpdate), s.upsertRoute)
+		routes.DELETE("/:routeKey", requirePerm(auth.PermRouteUpdate), s.deleteRoute)
+		routes.POST("/:routeKey/disable", requirePerm(auth.PermRouteUpdate), s.disableRoute)
 		routes.POST("/:routeKey/rollback", requirePerm(auth.PermRouteRollback), s.rollbackRoute)
 	}
 

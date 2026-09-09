@@ -186,6 +186,17 @@ func (a *ReleaseApplication) Deploy(ctx context.Context, releaseID int64) (*doma
 		return nil, err
 	}
 
+	// A route may have been disabled/deleted between the initial read and the
+	// lock. Build from current configuration so this deploy cannot restore it.
+	rel, target, err = a.loadTarget(ctx, releaseID)
+	if err != nil {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, err
+	}
+	if rel.Status != domain.ReleaseStatusDraft && rel.Status != domain.ReleaseStatusFailed {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, errors.New("cannot deploy release in status " + string(rel.Status))
+	}
 	log, blueprints, localPath, err := a.prepareRun(ctx, rel, target)
 	if err != nil {
 		a.lockSvc.ReleaseKey(ctx, lockKey, token)
@@ -222,6 +233,16 @@ func (a *ReleaseApplication) Retry(ctx context.Context, releaseID int64, fromIdx
 	token, err := a.lockSvc.AcquireKey(ctx, lockKey, a.lockTTL())
 	if err != nil {
 		return nil, err
+	}
+	// Rebuild under the lock to pick up route lifecycle changes.
+	rel, target, log, blueprints, localPath, err = a.loadForResume(ctx, releaseID)
+	if err != nil {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, err
+	}
+	if log.Status != domain.DeployStatusFailed || fromIdx < 0 || fromIdx >= len(blueprints) {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, errors.New("run changed before retry; refresh and retry again")
 	}
 	if err := a.stepSvc.ResetFrom(ctx, log.ID, fromIdx); err != nil {
 		a.lockSvc.ReleaseKey(ctx, lockKey, token)
@@ -275,6 +296,16 @@ func (a *ReleaseApplication) Resume(ctx context.Context, releaseID int64) (*doma
 		return nil, err
 	}
 
+	// Rebuild under the lock to pick up route lifecycle changes.
+	rel, target, log, blueprints, localPath, err = a.loadForResume(ctx, releaseID)
+	if err != nil {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, err
+	}
+	if log.Status != domain.DeployStatusPaused {
+		a.lockSvc.ReleaseKey(ctx, lockKey, token)
+		return nil, errors.New("run changed before resume; refresh and retry again")
+	}
 	go func() {
 		defer a.lockSvc.ReleaseKey(context.Background(), lockKey, token)
 		a.runAsync(rel.ID, target, log, blueprints, localPath)

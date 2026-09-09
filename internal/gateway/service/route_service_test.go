@@ -37,6 +37,13 @@ func (f fakeRouteRepository) RollbackRoute(context.Context, string, string, stri
 	return domain.Route{}, nil
 }
 
+func (f fakeRouteRepository) DeleteRoute(context.Context, string, contract.RouteOwner) error {
+	return nil
+}
+func (f fakeRouteRepository) DisableRoute(context.Context, string, contract.RouteOwner) error {
+	return nil
+}
+
 func TestLoadSnapshotsSpecificHostBeforeWildcard(t *testing.T) {
 	svc := NewRouteService(fakeRouteRepository{routes: []domain.Route{
 		{

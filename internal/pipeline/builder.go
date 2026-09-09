@@ -389,7 +389,7 @@ func (b *Builder) buildGatewayDrain(ctx context.Context, target *domain.DeployTa
 			}
 			backends = bs
 		}
-		enabled := len(backends) > 0
+		enabled := route.Enabled && len(backends) > 0
 		if !enabled {
 			// Keep a self placeholder so the upsert validates; the disabled status
 			// keeps it out of the served set.

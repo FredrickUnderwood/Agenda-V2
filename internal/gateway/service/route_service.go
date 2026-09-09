@@ -19,6 +19,8 @@ type RouteRepository interface {
 	GetRoute(context.Context, string) (domain.Route, error)
 	UpsertRoute(context.Context, domain.Route, []domain.Backend, string, string) (domain.Route, error)
 	RollbackRoute(context.Context, string, string, string) (domain.Route, error)
+	DeleteRoute(context.Context, string, contract.RouteOwner) error
+	DisableRoute(context.Context, string, contract.RouteOwner) error
 }
 
 type RouteService struct {
@@ -85,6 +87,22 @@ type BackendSnapshot struct {
 
 func (s *RouteService) ListRoutes(ctx context.Context) ([]domain.Route, error) {
 	return s.routes.ListRoutes(ctx)
+}
+
+func (s *RouteService) DeleteRoute(ctx context.Context, routeKey string, owner contract.RouteOwner) error {
+	if err := s.routes.DeleteRoute(ctx, routeKey, owner); err != nil {
+		return err
+	}
+	alog.Info(ctx, "gateway route deleted", zap.String("route_key", routeKey), zap.Int64("application_id", owner.ApplicationID), zap.String("env", owner.Env))
+	return nil
+}
+
+func (s *RouteService) DisableRoute(ctx context.Context, routeKey string, owner contract.RouteOwner) error {
+	if err := s.routes.DisableRoute(ctx, routeKey, owner); err != nil {
+		return err
+	}
+	alog.Info(ctx, "gateway route disabled", zap.String("route_key", routeKey), zap.Int64("application_id", owner.ApplicationID), zap.String("env", owner.Env))
+	return nil
 }
 
 func (s *RouteService) GetRoute(ctx context.Context, routeKey string) (domain.Route, error) {

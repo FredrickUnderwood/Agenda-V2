@@ -14,6 +14,8 @@ import (
 
 	"github.com/FredrickUnderwood/agenda-v2/config"
 	"github.com/FredrickUnderwood/agenda-v2/internal/contract"
+	"github.com/FredrickUnderwood/agenda-v2/internal/logger"
+	"go.uber.org/zap"
 )
 
 const serviceTokenHeader = "X-Service-Token"
@@ -34,6 +36,48 @@ func NewClient(cfg config.GatewayConfig) *Client {
 		serviceToken: cfg.ServiceToken,
 		httpClient:   &http.Client{Timeout: timeout},
 	}
+}
+
+func (c *Client) DeleteRoute(ctx context.Context, routeKey string, owner contract.RouteOwner) error {
+	return c.changeRoute(ctx, routeKey, owner, http.MethodDelete, "")
+}
+
+func (c *Client) DisableRoute(ctx context.Context, routeKey string, owner contract.RouteOwner) error {
+	return c.changeRoute(ctx, routeKey, owner, http.MethodPost, "/disable")
+}
+
+func (c *Client) changeRoute(ctx context.Context, routeKey string, owner contract.RouteOwner, method, suffix string) (err error) {
+	started := time.Now()
+	defer func() {
+		logger.L().Info("gateway route lifecycle request completed", zap.String("route_key", routeKey), zap.Int64("application_id", owner.ApplicationID), zap.String("env", owner.Env), zap.String("method", method), zap.Duration("duration", time.Since(started)), zap.Error(err))
+	}()
+	if c == nil || c.baseURL == "" || c.serviceToken == "" {
+		return errors.New("gateway base_url and service_token are required")
+	}
+	if routeKey == "" {
+		return errors.New("gateway route key is required")
+	}
+	raw, err := sonic.Marshal(owner)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/-/routes/"+url.PathEscape(routeKey)+suffix, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(serviceTokenHeader, c.serviceToken)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// Require the new endpoint's explicit acknowledgment. In particular, a 404
+	// from an older gateway must not release the control-plane reservation.
+	if resp.StatusCode != http.StatusNoContent {
+		return errors.New("gateway route lifecycle request failed: " + resp.Status)
+	}
+	return nil
 }
 
 func (c *Client) UpsertRoute(ctx context.Context, routeKey string, req contract.UpsertRouteRequest) error {
